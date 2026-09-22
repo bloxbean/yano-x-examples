@@ -126,17 +126,22 @@ chain/block/message identity.
 *Why an app chain:* the analytics stack stays exactly as it is; only the system
 of record becomes neutral.
 
-### 🔜 7. ERP callback after a finalized approval
-**Folder:** `07-webhook-effects-js` · **Language:** JavaScript · **Capability:** `effects:on-approved`, `executor:webhook`, `effects:runtime`
+### ✅ 7. ERP callback after a finalized approval
+**Folder:** `07-webhook-effects-js` · **Language:** JavaScript · **Capability:** `state:approval-workflow`, `effects:on-approved`, `executor:webhook`, `effects:runtime`
 
 An approval reaching its threshold triggers an acknowledged outbound HTTP call.
-A small Express receiver shows the deterministic `Idempotency-Key`, the
-2xx/4xx/5xx retry semantics, and the outcome being committed **back into
-consensus state** with its own effect proof.
+A dependency-free receiver shows the deterministic `Idempotency-Key`, the
+2xx/4xx/5xx semantics, and the outcome being committed **back into consensus
+state**.
 
 *Demonstrates:* the effect lifecycle — at-least-once external execution with
-exactly-once outcome incorporation. This is the capability that is hardest to
-reproduce with any other stack.
+exactly-once outcome incorporation. Also the configuration split that makes it
+work: *"reaching approval emits an effect"* is consensus config, while *"and I
+am the one who performs it"* is node-local, so exactly one member calls out.
+
+*And the trap it exposes:* a receiver must deduplicate on what it has **acted
+on**, not what it has **seen** — otherwise a retry after a transient failure is
+mistaken for a duplicate and the work is silently dropped.
 
 ### 💡 8. Cross-organization SLA evidence
 **Language:** Java · **Capability:** `state:ordered-log`

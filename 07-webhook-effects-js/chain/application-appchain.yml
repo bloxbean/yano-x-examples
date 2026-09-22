@@ -1,0 +1,43 @@
+# Chain definitions for example 07 - webhook effects.
+#
+# These are the CONSENSUS-SHARED settings: every member applies them
+# identically, and together they decide that reaching approval emits an effect.
+# The executor that actually performs the HTTP call is node-local and lives in
+# the per-node overlay the ./cluster script generates - see README.md.
+yano:
+  app-chain:
+    chains[0]:
+      chain-id: "release-chain"
+      state-machine: approvals
+
+      state:
+        commitment-profile: mpf-blake2b256-v1
+        format-fingerprint: 91ee14091200f1e24659112d640e877e9177779dcc81dd06117f013e9190082b
+        genesis-id: 438c21a31c41dba71c8e0d9af51c3398312fca5c5dc4195edc3c6c2743198ac5
+
+      membership:
+        mode: static
+
+      block:
+        interval-ms: 200
+
+      # Turn the effect runtime on for this chain.
+      effects:
+        enabled: true
+
+      machines:
+        approvals:
+          # Emit one effect when an approval reaches its threshold. This is
+          # consensus: every member agrees the effect was emitted, and later
+          # agrees what its outcome was.
+          #
+          #   type  routes it to an executor contract - webhook.post here.
+          #         The approvals machine does not interpret the payload; it
+          #         only carries it.
+          #   gate  app-final: emit only after the block is finalized.
+          on-approved-effect:
+            enabled: true
+            type: webhook.post
+            gate: app-final
+          activations:
+            on-approved-effect: 1

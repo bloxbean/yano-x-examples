@@ -1,0 +1,13 @@
+{
+  "name": "yano-x-webhook-effects-example",
+  "version": "1.0.0",
+  "description": "Yano X example 07 — an acknowledged HTTP call after a finalized approval",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "receiver": "node receiver.js",
+    "start": "node src/cli.js",
+    "test": "node test/run.js"
+  }
+}

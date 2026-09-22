@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Start, inspect and stop the release chain for this example.
+#
+#   ./cluster start 3   three members; only member 0 runs the webhook executor
+#
+# Effects have two halves with different scopes:
+#
+#   consensus-shared  "reaching approval emits an effect"   -> chain/application-appchain.yml
+#   node-local        "and I am the one who performs it"    -> generated below
+#
+# The launcher takes node-local settings as a directory of owner-only property
+# overlays, one per node. Generating them here keeps the split visible: only
+# node0 is told the endpoint, so exactly one member calls it.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd -P)"
+
+export EXAMPLE_HTTP_BASE="${EXAMPLE_HTTP_BASE:-7160}"
+export EXAMPLE_SERVER_BASE="${EXAMPLE_SERVER_BASE:-13460}"
+RECEIVER_URL="${RECEIVER_URL:-http://127.0.0.1:8160/erp/release}"
+
+if [ "${1:-}" = "start" ]; then
+  nodes="${2:-3}"
+  case "$nodes" in ''|*[!0-9]*) nodes=3 ;; esac
+
+  overlay="$HERE/.yano/node-config"
+  rm -rf "$overlay"
+  install -d -m 700 "$overlay"
+
+  # node0 executes effects. The others only agree that they happened.
+  {
+    printf 'config_ordinal=275\n'
+    printf 'yano.app-chain.chains[0].effects.executor.enabled=true\n'
+    printf 'yano.app-chain.chains[0].effects.executor.types=webhook.post\n'
+    printf 'yano.app-chain.chains[0].effects.executors.webhook.url=%s\n' "$RECEIVER_URL"
+    printf 'yano.app-chain.chains[0].effects.executors.webhook.timeout-ms=5000\n'
+  } > "$overlay/node0.properties"
+  chmod 600 "$overlay/node0.properties"
+
+  i=1
+  while [ "$i" -lt "$nodes" ]; do
+    printf 'config_ordinal=275\n' > "$overlay/node$i.properties"
+    chmod 600 "$overlay/node$i.properties"
+    i=$((i + 1))
+  done
+
+  export YANO_CLUSTER_NODE_CONFIG_DIR="$overlay"
+fi
+
+. "$HERE/../00-shared/lib/example-cluster.sh"
+example_cluster "$HERE" "$@"
