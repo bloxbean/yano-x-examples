@@ -2,6 +2,8 @@ package com.bloxbean.yano.examples.disbursement;
 
 import com.bloxbean.cardano.client.account.Account;
 import com.bloxbean.cardano.client.common.model.Networks;
+import com.bloxbean.cardano.client.metadata.cbor.CBORMetadata;
+import com.bloxbean.cardano.client.metadata.cbor.CBORMetadataMap;
 import com.bloxbean.cardano.client.transaction.spec.*;
 import com.bloxbean.cardano.client.transaction.util.TransactionUtil;
 import org.junit.jupiter.api.DisplayName;
@@ -85,6 +87,55 @@ class PayoutAuthorizationTest {
         String id = TransactionUtil.getTxHash(payment(PAYEE_A, 500_000_000L));
         assertEquals(64, id.length());
         assertEquals(32, java.util.HexFormat.of().parseHex(id).length);
+    }
+
+    // --------------------------------------------- evidence bound to the id
+
+    private static Transaction paymentWith(String evidenceHash) {
+        CBORMetadataMap entry = new CBORMetadataMap()
+                .put("milestone", "M1-alpha")
+                .put("evidence", evidenceHash);
+        AuxiliaryData aux = AuxiliaryData.builder()
+                .metadata(new CBORMetadata()
+                        .put(BigInteger.valueOf(Treasury.METADATA_LABEL), entry))
+                .build();
+        Transaction tx = payment(PAYEE_A, 500_000_000L);
+        tx.getBody().setAuxiliaryDataHash(aux.getAuxiliaryDataHash());
+        tx.setAuxiliaryData(aux);
+        return tx;
+    }
+
+    @Test
+    @DisplayName("different deliverables give a different id, with the money unchanged")
+    void evidenceIsCoveredByTheId() {
+        String a = TransactionUtil.getTxHash(paymentWith(Treasury.evidenceHash("parser + tests")));
+        String b = TransactionUtil.getTxHash(paymentWith(Treasury.evidenceHash("nothing delivered")));
+
+        assertNotEquals(a, b,
+                "swapping the deliverables must break the approval, even though the "
+                        + "amount and recipient are identical");
+    }
+
+    @Test
+    @DisplayName("attaching evidence at all changes the id")
+    void evidencePresenceChangesTheId() {
+        assertNotEquals(TransactionUtil.getTxHash(payment(PAYEE_A, 500_000_000L)),
+                TransactionUtil.getTxHash(paymentWith(Treasury.evidenceHash("x"))));
+    }
+
+    @Test
+    @DisplayName("the same deliverables give the same id, so it can be reproduced")
+    void sameEvidenceSameId() {
+        assertEquals(TransactionUtil.getTxHash(paymentWith(Treasury.evidenceHash("parser + tests"))),
+                TransactionUtil.getTxHash(paymentWith(Treasury.evidenceHash("parser + tests"))));
+    }
+
+    @Test
+    @DisplayName("the evidence hash is a 32-byte digest of the exact deliverable bytes")
+    void evidenceHashShape() {
+        String hash = Treasury.evidenceHash("milestone 1 deliverables");
+        assertEquals(64, hash.length());
+        assertNotEquals(hash, Treasury.evidenceHash("milestone 1 deliverables "));
     }
 
     // ------------------------------------------------------------- policy

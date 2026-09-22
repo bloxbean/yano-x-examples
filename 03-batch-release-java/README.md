@@ -73,7 +73,7 @@ Two distinctness modes, each for a reason that comes from the domain:
 ## Run it
 
 ```bash
-./cluster start 3 --anchor-mode metadata   # ~40s
+./cluster start 3   # ~40s
 mvn -B package
 java -jar target/batch-release.jar bootstrap   # the governed registry ceremony
 ./demo.sh                                       # the walkthrough (~40s)
@@ -230,9 +230,9 @@ revision, at this height*. It does not prove the stages happened in order.
   public half; the node never sees a private key.
 - **`role-approvals` is `preview` maturity**, not `stable` like `ordered-log` or
   `kv-registry`.
-- **Anchoring is metadata mode** on a local devnet, funded from the faucet. A
-  real deployment funds and guards that key, and chooses between metadata and
-  threshold-co-signed script anchoring.
+- **Anchoring is script mode** on a local devnet — a Plutus V3 thread NFT per
+  chain with a validator-enforced datum chain, faucet-funded by the launcher. A
+  real deployment funds and guards that key itself.
 
 ## Where to go next
 

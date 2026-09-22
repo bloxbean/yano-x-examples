@@ -69,6 +69,32 @@ prepare_yano_home() {
   printf '%s\n' "$home"
 }
 
+# Bootstrap the Plutus script anchor for every chain this example defines.
+#
+# Script anchoring mints a thread NFT per chain and parks it at a validator
+# address, so each chain gets its own on-chain identity and the anchor datum
+# chain is validator-enforced. It is a one-time step per chain, and on devnet
+# the launcher funds the anchor wallet from the faucet itself.
+#
+# Safe to repeat: a chain that is already bootstrapped is left alone.
+#   $1 = private yano home, $2 = data directory
+bootstrap_anchors() {
+    local home="$1" data="$2" chain state
+
+    for chain in $("$home/appchain-cluster/cluster.sh" chains --data-dir "$data" 2>/dev/null \
+            | sed -n 's/^  - //p'); do
+        state="$(curl -fsS "http://127.0.0.1:${EXAMPLE_HTTP_BASE:-7070}/api/v1/app-chain/chains/$chain/status" 2>/dev/null \
+            | sed -n 's/.*"bootstrapped":\([a-z]*\).*/\1/p' | head -1)"
+        if [ "$state" = "true" ]; then
+            note "  anchor: $chain already bootstrapped"
+            continue
+        fi
+        note "  anchor: bootstrapping $chain (mints its thread NFT, faucet-funded)"
+        "$home/appchain-cluster/cluster.sh" anchor-bootstrap "$chain" --data-dir "$data" \
+            >/dev/null 2>&1 || note "  anchor: $chain bootstrap did not complete — ./cluster logs 0"
+    done
+}
+
 # Run the bundled cluster launcher against this example's private home.
 #   $1 = example directory, rest = cluster.sh arguments
 example_cluster() {
@@ -95,12 +121,29 @@ example_cluster() {
   export YANO_HOME="$home"
 
   local -a args=("$1"); shift
+  local anchoring=1
   case "${args[0]}" in
     start)
       # Pass the example's fixed ports and data directory on start only;
       # later commands read them back from <data>/cluster.env.
-      while [ $# -gt 0 ]; do args+=("$1"); shift; done
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --anchor|--anchor-mode|--anchor-key|--anchor-every|--anchor-chain)
+            anchoring=0 ;;                 # the caller is steering anchoring itself
+          --no-anchor)
+            anchoring=0; shift; continue ;;
+        esac
+        args+=("$1"); shift
+      done
+      # Anchor to Cardano by default, in script mode: a Plutus V3 thread NFT
+      # whose datum chain the validator enforces, co-signed by a threshold of
+      # members. Pass --no-anchor to opt out.
+      [ "$anchoring" = 1 ] && args+=(--anchor)
       args+=(--data-dir "$data" --http-base "$http_base" --server-base "$server_base")
+
+      "$home/appchain-cluster/cluster.sh" "${args[@]}" || return $?
+      bootstrap_anchors "$home" "$data"
+      return 0
       ;;
     *)
       while [ $# -gt 0 ]; do args+=("$1"); shift; done

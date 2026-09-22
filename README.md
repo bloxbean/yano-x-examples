@@ -55,6 +55,12 @@ cd 01-audit-log-java
 `./cluster` also takes `status`, `stop`, `logs <node>` and anything else the
 bundled launcher accepts.
 
+**Anchoring is on by default.** Every example anchors its state root to the
+local Cardano devnet in script mode — a Plutus V3 thread NFT per chain, with a
+validator-enforced datum chain. The launcher funds the anchor wallet from the
+faucet and bootstraps each chain on first start, so there is nothing to set up.
+Opt out with `./cluster start 3 --no-anchor`.
+
 Each example gets its own chain, its own data directory and its own ports, so
 you can leave one running while you try another. Nothing is written back to the
 extracted distribution.

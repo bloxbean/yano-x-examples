@@ -4,7 +4,7 @@
 #   ./demo.sh          run the story, pausing between steps
 #   ./demo.sh --fast   run it without pauses
 #
-# Assumes the chain is up:  ./cluster start 3 --anchor-mode metadata
+# Assumes the chain is up:  ./cluster start 3
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
@@ -28,7 +28,7 @@ expect_refused() { dim "\$ batch ${*:3}"; if "$@"; then echo "UNEXPECTED: that s
 
 curl -fsS "http://127.0.0.1:7130/api/v1/app-chain/chains/batch-release-chain/status" >/dev/null 2>&1 || {
   printf 'error: batch-release-chain is not reachable on 127.0.0.1:7130\n' >&2
-  printf '       start it with:  ./cluster start 3 --anchor-mode metadata\n' >&2
+  printf '       start it with:  ./cluster start 3\n' >&2
   exit 1
 }
 
@@ -179,21 +179,14 @@ TXT
 pause
 
 step "15. Anchored to Cardano"
-# The anchor wallet is funded from the devnet faucet. On a public network you
-# would fund it yourself and guard the key — see README.md.
-ANCHOR_ADDR="$("${APP[@]}" anchor 2>/dev/null | awk '/anchor wallet/{print $3}')"
-if [ -n "$ANCHOR_ADDR" ] && [ "$("${APP[@]}" anchor 2>/dev/null | awk '/anchored count/{print $3}')" = "0" ]; then
-  dim "\$ curl -X POST .../devnet/fund  (faucet, devnet only)"
-  curl -s -X POST "http://localhost:7130/api/v1/devnet/fund" \
-    -H 'Content-Type: application/json' \
-    -d "{\"address\":\"$ANCHOR_ADDR\",\"ada\":500}" >/dev/null || true
-  printf '  waiting for the first anchor transaction'
-  for _ in $(seq 1 30); do
-    [ "$("${APP[@]}" anchor 2>/dev/null | awk '/anchored count/{print $3}')" != "0" ] && break
-    printf '.'; sleep 5
-  done
-  printf '\n\n'
-fi
+# ./cluster start enabled script anchoring and bootstrapped it, funding the
+# anchor wallet from the devnet faucet. Give the first anchor a moment.
+printf '  waiting for the first anchor transaction'
+for _ in $(seq 1 30); do
+  [ "$("${APP[@]}" anchor 2>/dev/null | awk '/anchored count/{print $3}')" != "0" ] && break
+  printf '.'; sleep 3
+done
+printf '\n\n'
 run "${APP[@]}" anchor
 pause
 

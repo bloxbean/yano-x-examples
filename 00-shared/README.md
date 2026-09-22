@@ -21,11 +21,41 @@ When you run `./cluster start 3` inside an example, this script:
 3. Runs the bundled `appchain-cluster/cluster.sh` against that home, with the
    example's own data directory and port range.
 
+4. Enables **Cardano anchoring** and bootstraps it (below).
+
 This is the same pattern the distribution's own showcase uses. The result:
 
 - the extracted distribution is never modified
 - two examples can run side by side on different ports
 - `./cluster clean` wipes one example without affecting anything else
+
+### Anchoring, on by default
+
+`./cluster start` enables **script-mode anchoring** and then bootstraps it for
+every chain the example defines. Script mode mints a Plutus V3 thread NFT per
+chain and parks it at a validator address, so each chain gets its own on-chain
+identity and the anchor datum chain is validator-enforced — stronger than
+metadata mode, where the anchor is just a transaction with a payload.
+
+On devnet the launcher funds the anchor wallet from the faucet itself, so there
+is nothing to do manually. Bootstrapping is one-time per chain and repeat
+starts skip chains that are already done.
+
+```bash
+./cluster start 3               # anchoring on, bootstrapped automatically
+./cluster start 3 --no-anchor   # opt out
+./cluster start 3 --anchor-mode metadata   # steer it yourself
+```
+
+Passing any `--anchor*` flag hands control back to you, and the launcher stops
+adding its own default.
+
+The first anchor appears once the chain has blocks to anchor and the bootstrap
+transaction is confirmed on L1 — a few seconds on devnet. Check it with:
+
+```bash
+curl -s localhost:7100/api/v1/app-chain/chains/<chain>/status | jq .anchor
+```
 
 ### Used by an example
 

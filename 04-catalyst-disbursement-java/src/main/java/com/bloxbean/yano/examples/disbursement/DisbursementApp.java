@@ -64,6 +64,14 @@ public final class DisbursementApp {
             case "show" -> show(require(rest.poll(), "show needs a milestone id"));
             case "tamper" -> tamper(require(rest.poll(), "tamper needs a milestone id"),
                     Options.parse(rest));
+            case "anchor" -> {
+                Options options = Options.parse(rest);
+                if (options.orDefault("fund", null) != null) {
+                    fundAnchor(Long.parseLong(options.orDefault("fund", "0")));
+                    Chain.sleep(3000);
+                }
+                anchor();
+            }
             default -> {
                 System.err.println("unknown command: " + command);
                 usage();
@@ -137,18 +145,27 @@ public final class DisbursementApp {
     private void prepare(String milestoneId, Options options) {
         String payee = options.required("to");
         long lovelace = (long) (Double.parseDouble(options.required("ada")) * 1_000_000L);
+        String deliverables = options.orDefault("evidence",
+                "deliverables for " + milestoneId);
+        String evidence = Treasury.evidenceHash(deliverables);
 
-        Treasury.Prepared payout = treasury.prepare(milestoneId, payee, lovelace);
+        Treasury.Prepared payout = treasury.prepare(milestoneId, payee, lovelace, evidence);
 
         System.out.printf("Prepared the payout for %s%n%n", milestoneId);
         System.out.printf("  payee            %s%n", payout.payee());
         System.out.printf("  amount           %s ada%n", payout.amountAda());
+        System.out.printf("  deliverables     \"%s\"%n", deliverables);
+        System.out.printf("  evidence hash    %s%n", evidence);
         System.out.printf("  transaction id   %s%n", payout.transactionId());
         System.out.println("""
 
-                  That id is the Blake2b-256 hash of the transaction body, and it is what
-                  reviewers will authorize. The transaction is NOT signed yet — the
-                  treasury key is applied only after approval.""");
+                  The milestone and the evidence hash travel INSIDE the transaction, as
+                  metadata. A transaction's auxiliary-data hash is part of its body, so
+                  the id covers them — one approved hash means "pay this, for this
+                  milestone, against these deliverables".
+
+                  The transaction is NOT signed yet. The treasury key is applied only
+                  after approval.""");
     }
 
     private void propose(String milestoneId, Options options) {
@@ -238,6 +255,7 @@ public final class DisbursementApp {
             Treasury.Prepared payout = treasury.load(milestoneId);
             System.out.printf("  prepared payout  %s ada -> %s…%n",
                     payout.amountAda(), payout.payee().substring(0, 24));
+            System.out.printf("  evidence hash    %s%n", payout.evidenceHash());
             System.out.printf("  transaction id   %s%n", payout.transactionId());
             System.out.printf("  on chain         %s%n",
                     treasury.isOnChain(payout.transactionId()) ? "yes" : "not yet");
@@ -265,13 +283,71 @@ public final class DisbursementApp {
     /** Swap the prepared payout for a different one, after it was approved. */
     private void tamper(String milestoneId, Options options) {
         Treasury.Prepared before = treasury.load(milestoneId);
-        long lovelace = (long) (Double.parseDouble(options.required("ada")) * 1_000_000L);
+        String newDeliverables = options.orDefault("evidence", null);
 
-        Treasury.Prepared after = treasury.tamper(milestoneId, lovelace);
-        System.out.printf("Replaced the prepared payout for %s%n%n", milestoneId);
-        System.out.printf("  was   %s ada   transaction %s%n", before.amountAda(), before.transactionId());
-        System.out.printf("  now   %s ada   transaction %s%n", after.amountAda(), after.transactionId());
+        Treasury.Prepared after;
+        if (newDeliverables != null) {
+            after = treasury.tamperEvidence(milestoneId, newDeliverables);
+            System.out.printf("Swapped the DELIVERABLES for %s — the money is unchanged%n%n",
+                    milestoneId);
+            System.out.printf("  amount          %s ada, both before and after%n", after.amountAda());
+            System.out.printf("  evidence was    %s%n", before.evidenceHash());
+            System.out.printf("  evidence now    %s%n", after.evidenceHash());
+        } else {
+            long lovelace = (long) (Double.parseDouble(options.required("ada")) * 1_000_000L);
+            after = treasury.tamper(milestoneId, lovelace);
+            System.out.printf("Replaced the prepared payout for %s%n%n", milestoneId);
+            System.out.printf("  amount was      %s ada%n", before.amountAda());
+            System.out.printf("  amount now      %s ada%n", after.amountAda());
+        }
+        System.out.printf("%n  transaction was %s%n", before.transactionId());
+        System.out.printf("  transaction now %s%n", after.transactionId());
         System.out.println("\n  The reviewers approved the first id. Try `disburse execute`.");
+    }
+
+    /** The app chain's own footprint on Cardano — separate from the payouts. */
+    private void anchor() {
+        var status = chain.anchorStatus();
+        System.out.println("Cardano L1 — two separate things happen here\n");
+        System.out.printf("  1. payouts        from the fund treasury%n");
+        System.out.printf("     treasury       %s%n", treasury.treasuryAddress());
+        System.out.printf("     balance        %s ada%n%n",
+                java.math.BigDecimal.valueOf(
+                        Math.max(0, treasury.balanceLovelace(treasury.treasuryAddress())), 6)
+                        .toPlainString());
+
+        System.out.println("  2. anchoring      the app chain's state root, published periodically");
+        if (status == null || status.isMissingNode() || !status.path("enabled").asBoolean(false)) {
+            System.out.println("     not enabled — start with ./cluster start 3 --anchor-mode metadata");
+            return;
+        }
+        System.out.printf("     anchor wallet  %s%n", status.path("address").asText());
+        System.out.printf("     anchored       %d time(s), last at height %d%n",
+                status.path("anchoredCount").asLong(), status.path("lastAnchoredHeight").asLong());
+        String lastTx = status.path("lastAnchorTx").asText("");
+        if (!lastTx.isEmpty()) {
+            System.out.printf("     last anchor tx %s%n", lastTx);
+        }
+        String error = status.path("lastError").asText("");
+        if (!error.isEmpty() && status.path("anchoredCount").asLong() == 0) {
+            System.out.printf("%n     not anchoring yet: %s%n", error);
+            System.out.println("     The anchor wallet needs funding — `disburse anchor --fund 500`.");
+        }
+        System.out.println("""
+
+                  These are different wallets with different jobs. The treasury pays
+                  projects; the anchor wallet pays the fee to publish the state root that
+                  every approval above is committed under.""");
+    }
+
+    /** Fund the anchor wallet from the devnet faucet. */
+    private void fundAnchor(long ada) {
+        String address = chain.anchorStatus().path("address").asText("");
+        if (address.isEmpty()) {
+            throw new IllegalStateException("anchoring is not enabled on this cluster");
+        }
+        System.out.printf("Funding the anchor wallet with %d ada%n  %s%n%n", ada, address);
+        System.out.println("  " + treasury.fundAddress(address, ada));
     }
 
     // ----------------------------------------------------------------- CLI
@@ -291,13 +367,16 @@ public final class DisbursementApp {
                   disburse cast                             who reviews, and what a payout needs
                   disburse treasury [--fund <ada>]          the fund's Cardano address and balance
 
-                  disburse prepare <milestone> --to <addr> --ada <n>
+                  disburse anchor  [--fund <ada>]           the app chain's own L1 anchoring
+
+                  disburse prepare <milestone> --to <addr> --ada <n> [--evidence <text>]
                   disburse propose <milestone> [--via N]
                   disburse review  <milestone> --actor <actor> [--via N]
                   disburse reject  <milestone> --actor <actor>
                   disburse execute <milestone>
                   disburse show    <milestone>
-                  disburse tamper  <milestone> --ada <n>    alter the payout after approval
+                  disburse tamper  <milestone> --ada <n>          change the amount
+                  disburse tamper  <milestone> --evidence <text>  change only the deliverables
 
                 What reviewers sign is the payout transaction's id, which IS the hash of
                 its body — so the approval names exactly one payment.

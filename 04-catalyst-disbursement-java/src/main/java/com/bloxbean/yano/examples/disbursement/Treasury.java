@@ -6,6 +6,8 @@ import com.bloxbean.cardano.client.api.model.Result;
 import com.bloxbean.cardano.client.backend.api.BackendService;
 import com.bloxbean.cardano.client.backend.blockfrost.service.BFBackendService;
 import com.bloxbean.cardano.client.common.model.Networks;
+import com.bloxbean.cardano.client.metadata.cbor.CBORMetadata;
+import com.bloxbean.cardano.client.metadata.cbor.CBORMetadataMap;
 import com.bloxbean.cardano.client.function.helper.SignerProviders;
 import com.bloxbean.cardano.client.quicktx.QuickTxBuilder;
 import com.bloxbean.cardano.client.quicktx.Tx;
@@ -69,9 +71,18 @@ public final class Treasury {
         return treasury.baseAddress();
     }
 
+    /**
+     * The metadata label the payout carries its milestone and evidence under.
+     *
+     * <p>1694 is the CIP-1694 governance label; a real fund would register its
+     * own. What matters is that the label and its contents are inside the
+     * transaction, and therefore inside the id.
+     */
+    public static final long METADATA_LABEL = 1694L;
+
     /** A payout that has been built but not yet authorized or signed. */
     public record Prepared(String milestoneId, String payee, long lovelace,
-                           String transactionId, byte[] transactionBytes) {
+                           String evidenceHash, String transactionId, byte[] transactionBytes) {
 
         public byte[] payloadHash() {
             return HexFormat.of().parseHex(transactionId);
@@ -85,23 +96,39 @@ public final class Treasury {
     // ------------------------------------------------------------- building
 
     /**
-     * Build the payout transaction, unsigned.
+     * Build the payout transaction, unsigned, carrying its milestone and the
+     * hash of the deliverables it is being paid for.
+     *
+     * <p>The evidence hash goes into transaction metadata, and a transaction's
+     * auxiliary-data hash is part of its <em>body</em> — so the id covers it.
+     * That is what makes one approved hash mean "pay this, for this milestone,
+     * against these deliverables" rather than merely "pay this".
+     *
+     * <p>Swap the deliverables and the id changes, so the approval no longer
+     * matches — caught by the same single comparison that catches a changed
+     * amount.
      *
      * <p>The returned id is what reviewers will authorize. The bytes are spooled
      * to disk so the exact transaction — not a rebuilt one — is what gets
      * submitted later.
      */
-    public Prepared prepare(String milestoneId, String payee, long lovelace) {
+    public Prepared prepare(String milestoneId, String payee, long lovelace, String evidenceHash) {
+        CBORMetadataMap entry = new CBORMetadataMap()
+                .put("milestone", milestoneId)
+                .put("evidence", evidenceHash);
+
         Transaction unsigned = new QuickTxBuilder(backend)
                 .compose(new Tx()
                         .payToAddress(payee, Amount.lovelace(BigInteger.valueOf(lovelace)))
+                        .attachMetadata(new CBORMetadata()
+                                .put(BigInteger.valueOf(METADATA_LABEL), entry))
                         .from(treasury.baseAddress()))
                 .withSigner(SignerProviders.signerFrom(treasury))
                 .build();   // builds only — the witness set is still empty
 
         try {
             byte[] bytes = unsigned.serialize();
-            Prepared prepared = new Prepared(milestoneId, payee, lovelace,
+            Prepared prepared = new Prepared(milestoneId, payee, lovelace, evidenceHash,
                     TransactionUtil.getTxHash(unsigned), bytes);
             Files.createDirectories(SPOOL);
             Files.write(spoolFile(milestoneId), bytes);
@@ -109,6 +136,16 @@ public final class Treasury {
         } catch (Exception failure) {
             throw new IllegalStateException("could not build the payout: " + failure.getMessage(),
                     failure);
+        }
+    }
+
+    /** SHA-256 of the exact deliverable bytes an application chose to commit to. */
+    public static String evidenceHash(String deliverables) {
+        try {
+            return HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(deliverables.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (Exception impossible) {
+            throw new IllegalStateException(impossible);
         }
     }
 
@@ -126,7 +163,7 @@ public final class Treasury {
                     : transaction.getBody().getOutputs().getFirst().getValue().getCoin().longValue();
             String payee = transaction.getBody().getOutputs().isEmpty() ? "?"
                     : transaction.getBody().getOutputs().getFirst().getAddress();
-            return new Prepared(milestoneId, payee, lovelace,
+            return new Prepared(milestoneId, payee, lovelace, readEvidence(transaction),
                     TransactionUtil.getTxHash(transaction), bytes);
         } catch (Exception malformed) {
             throw new IllegalStateException("the spooled payout for " + milestoneId
@@ -134,10 +171,50 @@ public final class Treasury {
         }
     }
 
+    /**
+     * Read the evidence commitment back out of the transaction itself.
+     *
+     * <p>Nothing outside the transaction has to be consulted: the commitment
+     * travels with the payment, all the way onto the chain.
+     */
+    private static String readEvidence(Transaction transaction) {
+        try {
+            var metadata = transaction.getAuxiliaryData().getMetadata();
+            var entry = metadata.getData().get(
+                    new co.nstant.in.cbor.model.UnsignedInteger(METADATA_LABEL));
+            if (entry instanceof co.nstant.in.cbor.model.Map map) {
+                var value = map.get(new co.nstant.in.cbor.model.UnicodeString("evidence"));
+                return value == null ? "" : value.toString();
+            }
+            return "";
+        } catch (RuntimeException absent) {
+            return "";
+        }
+    }
+
     /** Overwrite a spooled payout — used to demonstrate that tampering is caught. */
     public Prepared tamper(String milestoneId, long newLovelace) {
         Prepared original = load(milestoneId);
-        Prepared altered = prepare(milestoneId + "-tampered", original.payee(), newLovelace);
+        Prepared altered = prepare(milestoneId + "-tampered", original.payee(), newLovelace,
+                original.evidenceHash());
+        try {
+            Files.write(spoolFile(milestoneId), altered.transactionBytes());
+        } catch (IOException failure) {
+            throw new IllegalStateException(failure);
+        }
+        return load(milestoneId);
+    }
+
+    /**
+     * Swap the deliverables while leaving the payment identical.
+     *
+     * <p>This is the case the evidence binding exists for: the money is
+     * unchanged, so an amount-based check would see nothing wrong.
+     */
+    public Prepared tamperEvidence(String milestoneId, String newDeliverables) {
+        Prepared original = load(milestoneId);
+        Prepared altered = prepare(milestoneId + "-tampered", original.payee(),
+                original.lovelace(), evidenceHash(newDeliverables));
         try {
             Files.write(spoolFile(milestoneId), altered.transactionBytes());
         } catch (IOException failure) {
@@ -186,12 +263,17 @@ public final class Treasury {
 
     /** Top up the treasury from the devnet faucet. Devnet only, obviously. */
     public String fundTreasury(long ada) {
+        return fundAddress(treasury.baseAddress(), ada);
+    }
+
+    /** Faucet any address — the anchor wallet needs this too. */
+    public String fundAddress(String address, long ada) {
         try {
             HttpResponse<String> response = HttpClient.newHttpClient().send(
                     HttpRequest.newBuilder(URI.create(apiUrl + "devnet/fund"))
                             .header("Content-Type", "application/json")
                             .POST(HttpRequest.BodyPublishers.ofString(
-                                    "{\"address\":\"" + treasury.baseAddress() + "\",\"ada\":" + ada + "}"))
+                                    "{\"address\":\"" + address + "\",\"ada\":" + ada + "}"))
                             .build(),
                     HttpResponse.BodyHandlers.ofString());
             return response.body();

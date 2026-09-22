@@ -4,7 +4,7 @@
 #   ./demo.sh          run the story, pausing between steps
 #   ./demo.sh --fast   run it without pauses
 #
-# Assumes the chain is up:  ./cluster start 3 --anchor-mode metadata
+# Assumes the chain is up:  ./cluster start 3
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
@@ -28,7 +28,7 @@ expect_refused() { dim "\$ disburse ${*:3}"; if "$@"; then echo "UNEXPECTED: tha
 
 curl -fsS "http://127.0.0.1:7140/api/v1/app-chain/chains/disbursement-chain/status" >/dev/null 2>&1 || {
   printf 'error: disbursement-chain is not reachable on 127.0.0.1:7140\n' >&2
-  printf '       start it with:  ./cluster start 3 --anchor-mode metadata\n' >&2
+  printf '       start it with:  ./cluster start 3\n' >&2
   exit 1
 }
 
@@ -68,11 +68,18 @@ TXT
 pause
 
 step "3. Build the payout — unsigned"
-run "${APP[@]}" prepare "$M1" --to "$PAYEE" --ada 500
+run "${APP[@]}" prepare "$M1" --to "$PAYEE" --ada 500 --evidence "milestone 1: parser + test suite, commit a91f3c"
 cat <<'TXT'
 
-Note what has NOT happened: the treasury key has not signed anything. The
-transaction exists, it has an id, and that id is what reviewers will authorize.
+Two things went into that transaction: the payment, and a hash of the
+deliverables it is being paid for. The deliverable hash rides in transaction
+metadata, and a transaction's auxiliary-data hash is part of its body — so the
+transaction id covers both.
+
+That is what makes one approved hash mean "pay this, for this milestone,
+against these deliverables" rather than merely "pay this".
+
+Note also what has NOT happened: the treasury key has not signed anything.
 TXT
 pause
 
@@ -130,8 +137,30 @@ Any change at all to the payment produces a different id.
 TXT
 pause
 
-step "11. Restore the approved payout and pay it"
-run "${APP[@]}" prepare "$M1" --to "$PAYEE" --ada 500
+step "11. Now the subtler attack — same money, different work"
+run "${APP[@]}" prepare "$M1" --to "$PAYEE" --ada 500 --evidence "milestone 1: parser + test suite, commit a91f3c"
+run "${APP[@]}" tamper "$M1" --evidence "milestone 1: nothing was delivered"
+cat <<'TXT'
+
+The amount is identical. The recipient is identical. Only the claimed
+deliverables changed — the kind of swap an amount-based control would never
+see.
+TXT
+pause
+
+step "12. Also refused"
+expect_refused "${APP[@]}" execute "$M1"
+cat <<'TXT'
+
+Same single comparison, no new rule. The deliverable hash is inside the
+transaction, so changing it changed the transaction id.
+
+This is why the evidence belongs in the transaction rather than beside it.
+TXT
+pause
+
+step "13. Restore the approved payout and pay it"
+run "${APP[@]}" prepare "$M1" --to "$PAYEE" --ada 500 --evidence "milestone 1: parser + test suite, commit a91f3c"
 cat <<'TXT'
 
 Rebuilding the same payment reproduces the same id, so a reviewer could
@@ -141,7 +170,7 @@ TXT
 run "${APP[@]}" execute "$M1"
 pause
 
-step "12. Check it from the outside"
+step "14. Check it from the outside"
 run "${APP[@]}" show "$M1"
 cat <<'TXT'
 
@@ -161,8 +190,10 @@ What this demonstrated:
   * two reviewers required from DISTINCT ORGANIZATIONS before money moves
   * the treasury key signing only after approval — witnesses sit outside the
     transaction body, so signing cannot change the id
-  * a payout altered after approval being refused, without any rule that
-    mentions amounts
+  * the deliverables committed INSIDE the payment, so one approved hash covers
+    the money and the work it is for
+  * a payout altered after approval being refused — whether the amount changed
+    or only the claimed deliverables — without any rule that mentions either
   * an end-to-end check anyone can repeat against Cardano
 
 What it does NOT do:

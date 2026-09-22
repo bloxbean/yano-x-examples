@@ -3,7 +3,7 @@
 **Run time:** about 15 seconds · **Audience:** anyone · **Language:** Java
 
 ```bash
-./cluster start 3 --anchor-mode metadata
+./cluster start 3
 mvn -B package
 java -jar target/disbursement.jar bootstrap
 ./demo.sh

@@ -9,7 +9,7 @@ check it against Cardano.
 
 | | |
 |---|---|
-| Capability | `state:role-approvals` (preview), `anchor:metadata`, Cardano tx submission |
+| Capability | `state:role-approvals` (preview), `anchor:script`, Cardano tx submission |
 | Members | 3 nodes, threshold 2 |
 | Actors | 4 people, 3 organizations, 1 policy |
 | Needs | Java 25, Maven, `curl`, `jq`, `python3` |
@@ -48,6 +48,35 @@ look up the transaction on chain, look up the approval, compare the values.
    submit to Cardano  →  on-chain txid == the approved hash
 ```
 
+## What the approved hash covers
+
+The payout carries its milestone and a hash of the deliverables as **transaction
+metadata**:
+
+```
+metadata label 1694:
+  milestone : "M1-alpha"
+  evidence  : <SHA-256 of the deliverable manifest>
+```
+
+A transaction's `auxiliary_data_hash` is a field of its **body**, so the
+transaction id covers the metadata too. One approved hash therefore means:
+
+> pay this amount, to this address, for this milestone, against these deliverables
+
+rather than just *"pay this amount to this address"*. Swap the deliverables and
+the id changes — caught by exactly the same comparison that catches a changed
+amount, with no rule that mentions either.
+
+Without this, an approval record would name a payment but say nothing about
+what the payment was *for*, and "what did the reviewers actually see?" would be
+unanswerable from the chain.
+
+> **It binds the reference, not the availability.** The chain proves reviewers
+> approved a payment against manifest *Y*; it does not guarantee anyone can
+> still fetch what *Y* hashes. Retention of the deliverables is a separate
+> problem, exactly as with `doc-trail` in example 03.
+
 ## Why the order works
 
 Signing does **not** change a transaction's id, because witnesses live in the
@@ -66,7 +95,7 @@ after signing and refuses if it moved.
 ## Run it
 
 ```bash
-./cluster start 3 --anchor-mode metadata   # ~40s
+./cluster start 3   # ~40s
 mvn -B package
 java -jar target/disbursement.jar bootstrap
 ./demo.sh                                   # ~15s
@@ -79,7 +108,8 @@ D="java -jar target/disbursement.jar"
 PAYEE=addr_test1...
 
 $D treasury --fund 2000                     # faucet-fund the fund's address
-$D prepare M1-alpha --to $PAYEE --ada 500   # build the payout, unsigned
+$D prepare M1-alpha --to $PAYEE --ada 500 \
+     --evidence "milestone 1: parser + tests, commit a91f3c"
 $D propose M1-alpha                         # open it for review
 $D review  M1-alpha --actor reviewer-omar   # Guild North
 $D review  M1-alpha --actor reviewer-pia    # Guild South — completes it
@@ -171,6 +201,11 @@ src/main/java/.../
   reproducible — which makes every private key here public.
 
 - **`role-approvals` is `preview` maturity.**
+
+- **The evidence hash is of a string here.** A real fund would hash a
+  deliverable manifest file, a release artifact, or a repository commit tree —
+  whatever it can reproduce later. `Treasury.evidenceHash` is where that choice
+  lives.
 
 ## Related
 
