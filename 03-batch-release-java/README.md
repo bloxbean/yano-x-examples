@@ -73,11 +73,14 @@ Two distinctness modes, each for a reason that comes from the domain:
 ## Run it
 
 ```bash
-./cluster start 3   # ~40s
+./cluster start 3   # ~40s, anchoring bootstrapped automatically
 mvn -B package
-java -jar target/batch-release.jar bootstrap   # the governed registry ceremony
-./demo.sh                                       # the walkthrough (~40s)
+./demo.sh           # the walkthrough (~30s)
 ```
+
+`demo.sh` registers the cast itself on a fresh chain — the ceremony is
+idempotent, so it is skipped when already done. Run it on its own with
+`java -jar target/batch-release.jar bootstrap`.
 
 ```bash
 ./cluster stop        # stop, keep data

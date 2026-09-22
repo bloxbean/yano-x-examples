@@ -5,7 +5,6 @@
 ```bash
 ./cluster start 3
 mvn -B package
-java -jar target/disbursement.jar bootstrap
 ./demo.sh
 ```
 

@@ -95,10 +95,9 @@ after signing and refuses if it moved.
 ## Run it
 
 ```bash
-./cluster start 3   # ~40s
+./cluster start 3   # ~40s, anchoring bootstrapped automatically
 mvn -B package
-java -jar target/disbursement.jar bootstrap
-./demo.sh                                   # ~15s
+./demo.sh           # ~20s
 ```
 
 ## Use it directly

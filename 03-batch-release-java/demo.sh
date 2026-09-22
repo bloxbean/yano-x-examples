@@ -32,6 +32,18 @@ curl -fsS "http://127.0.0.1:7130/api/v1/app-chain/chains/batch-release-chain/sta
   exit 1
 }
 
+# The registry ceremony has to happen before anyone can sign anything, and a
+# fresh chain (or ./cluster clean) starts without it. It is idempotent, so run
+# it here and keep the walkthrough self-contained — quiet when already done.
+BOOTSTRAP_OUTPUT="$("${APP[@]}" bootstrap 2>&1)" || {
+  printf '%s\n' "$BOOTSTRAP_OUTPUT" >&2
+  exit 1
+}
+case "$BOOTSTRAP_OUTPUT" in
+  *"already bootstrapped"*|*"Already bootstrapped"*) ;;
+  *) bold "Registering the cast (one-time, on a fresh chain)"; printf '%s\n' "$BOOTSTRAP_OUTPUT" ;;
+esac
+
 clear
 bold "Pharmaceutical batch release"
 cat <<'TXT'

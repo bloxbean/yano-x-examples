@@ -5,7 +5,6 @@
 ```bash
 ./cluster start 3
 mvn -B package
-java -jar target/batch-release.jar bootstrap
 ./demo.sh
 ```
 
