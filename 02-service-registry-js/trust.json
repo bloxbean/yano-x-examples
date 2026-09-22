@@ -1,0 +1,26 @@
+{
+  "_comment": [
+    "What this application trusts. Everything else it checks for itself.",
+    "",
+    "These are the member public keys and the threshold agreed by the",
+    "consortium. An application pins them here, out of band, and verifies every",
+    "answer against them. It never asks a node who the members are — that would",
+    "let the node nominate its own signers.",
+    "",
+    "In this example they are the cluster launcher's DEMO keys, derived from a",
+    "published seed (node i uses the byte i+1, repeated 32 times). Print them",
+    "with `./cluster keys 3`. They are public, and must never be used for",
+    "anything real.",
+    "",
+    "In a deployment this file is the output of the genesis ceremony: each",
+    "organization generates its own key on its own machine and publishes only",
+    "the public half."
+  ],
+  "chainId": "service-registry-chain",
+  "threshold": 2,
+  "members": [
+    { "label": "acme-bank",     "publicKey": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c" },
+    { "label": "borealis-bank", "publicKey": "8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394" },
+    { "label": "clearing-house", "publicKey": "ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1" }
+  ]
+}

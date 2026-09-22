@@ -1,0 +1,42 @@
+# Chain definitions for example 03 - pharmaceutical batch release.
+#
+# `role-approvals` is a composite profile: a governed organization/actor
+# registry plus a role-aware approval workflow. Its administrators are NOT
+# configured here - the profile derives them from the genesis membership epoch
+# (see RoleWorkflowGovernanceConfig), so the app-chain members are the registry
+# administrators at the genesis threshold.
+yano:
+  plugins:
+    # Consensus code must be explicitly allow-listed before it can be resolved.
+    allow-list:
+      - org.yanoproject.x.composite
+      - org.yanoproject.x.role-workflow
+
+  app-chain:
+    chains[0]:
+      chain-id: "batch-release-chain"
+      state-machine: role-approvals
+
+      state:
+        commitment-profile: mpf-blake2b256-v1
+        format-fingerprint: 91ee14091200f1e24659112d640e877e9177779dcc81dd06117f013e9190082b
+        genesis-id: c0d508b83cdc3e2bd78f587179313c3b504a3b582a5634169274a59c8f256dd8
+
+      # Governed membership: the member set is itself finalized in chain
+      # history. The genesis epoch is what seeds the registry administrators.
+      membership:
+        mode: governed
+
+      # 200ms blocks keep the walkthrough responsive: each command waits for
+      # its message to finalize, and that wait dominates the demo's runtime.
+      block:
+        interval-ms: 200
+
+      # Lifetimes are counted in BLOCKS, so a faster chain shortens every
+      # deadline in wall-clock terms. 18000 blocks is an hour at 200ms — long
+      # enough that a governed change cannot expire while someone is talking
+      # through the demo. The limit is 1,000,000.
+      machines:
+        composite:
+          roles:
+            maximum-mutation-lifetime-blocks: 18000

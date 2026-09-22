@@ -1,0 +1,32 @@
+# Chain definitions for example 02 — consortium service registry.
+#
+# Replaces config/application-appchain.yml inside the example's private Yano
+# home (.yano/config). Members, signing keys, peers, proposer and threshold are
+# injected per node by the bundled cluster launcher.
+yano:
+  app-chain:
+    chains[0]:
+      chain-id: "service-registry-chain"
+      state-machine: kv-registry
+
+      # See 01-audit-log-java/chain/application-appchain.yml for what these
+      # three fields mean. format-fingerprint is the fixed constant of the
+      # mpf-blake2b256-v1 profile; genesis-id is a fresh value for THIS chain
+      # (openssl rand -hex 32) and differs from example 01's on purpose.
+      state:
+        commitment-profile: mpf-blake2b256-v1
+        format-fingerprint: 91ee14091200f1e24659112d640e877e9177779dcc81dd06117f013e9190082b
+        genesis-id: e208e2576c58bc217342a51191ad5b1568afd316fcd90971dab4b350b6d26ebb
+
+      membership:
+        mode: static
+
+      block:
+        interval-ms: 1000
+
+      machines:
+        kv-registry:
+          # Values must be valid UTF-8. The alternatives are `raw` (any
+          # non-empty bytes) and `cbor` (one well-formed CBOR item).
+          # All members must agree; changing it later changes consensus.
+          value-format: utf8

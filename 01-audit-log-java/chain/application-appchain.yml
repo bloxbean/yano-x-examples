@@ -1,0 +1,57 @@
+# Chain definitions for example 01 — shared access-change audit log.
+#
+# This file replaces config/application-appchain.yml inside the example's
+# private Yano home (.yano/config). Members, signing keys, peers, proposer and
+# threshold are injected per node by the bundled cluster launcher, so the same
+# YAML runs unchanged at any node count.
+yano:
+  app-chain:
+    chains[0]:
+      # One chain, one job: an append-only log of access-control changes.
+      chain-id: "access-log-chain"
+      state-machine: ordered-log
+
+      # The authenticated-state commitment identity. All three fields form one
+      # indivisible identity and must be configured together — but only one of
+      # them is yours to choose.
+      #
+      # commitment-profile  Pick one of the released profiles. This one commits
+      #                     state in a Merkle Patricia Forestry over Blake2b-256
+      #                     and is the only profile whose proofs can also be
+      #                     verified on-chain by a Cardano script.
+      #
+      # format-fingerprint  DERIVED, not chosen. It is the Blake2b-256 of the
+      #                     profile's canonical descriptor, so it is a fixed
+      #                     constant for mpf-blake2b256-v1 — copy it as-is. The
+      #                     runtime recomputes it from the profile and refuses
+      #                     to start if yours disagrees. It exists to catch a
+      #                     config that names one profile but expects another.
+      #
+      # genesis-id          CHOSEN. Any fresh 32 random bytes, unique to this
+      #                     chain. It is not a secret and not a key — it is what
+      #                     keeps two chains with identical settings from being
+      #                     mistaken for each other. Generate your own:
+      #
+      #                         openssl rand -hex 32
+      #
+      #                     Every member must configure the SAME value; it is
+      #                     part of shared consensus identity, and it cannot be
+      #                     changed later without starting a new chain.
+      #
+      # `GET /state/identity` reports a different genesis id than the one below.
+      # That is expected: the runtime derives the effective value from this one
+      # plus the committed application profile.
+      state:
+        commitment-profile: mpf-blake2b256-v1
+        format-fingerprint: 91ee14091200f1e24659112d640e877e9177779dcc81dd06117f013e9190082b
+        genesis-id: 0a3a2d56aa304534cea0bd3a9ba46e4e9fa989894ff71be7a7039a089772e7d8
+
+      # Static membership: the member set is fixed at bootstrap. Adding a member
+      # or changing the threshold later needs `membership.mode: governed`.
+      membership:
+        mode: static
+
+      # A block every second keeps the demo responsive. Finality still needs a
+      # round trip to a threshold of members — it is not instant.
+      block:
+        interval-ms: 1000

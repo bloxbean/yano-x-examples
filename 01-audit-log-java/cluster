@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Start, inspect and stop the three-member access-log chain for this example.
+#
+#   ./cluster start 3     three nodes on a private devnet (HTTP 7100..7102)
+#   ./cluster status      per-node tip, state root and cross-node consistency
+#   ./cluster logs 0 -f   tail a node log
+#   ./cluster stop        stop the nodes, keep the data
+#   ./cluster clean       stop and wipe .yano/data
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd -P)"
+
+# Distinct ports per example so several can run side by side.
+export EXAMPLE_HTTP_BASE="${EXAMPLE_HTTP_BASE:-7100}"
+export EXAMPLE_SERVER_BASE="${EXAMPLE_SERVER_BASE:-13400}"
+
+. "$HERE/../00-shared/lib/example-cluster.sh"
+example_cluster "$HERE" "$@"

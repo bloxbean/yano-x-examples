@@ -1,0 +1,21 @@
+# Extracted Yano X distribution — download it from the releases page
+yano-x-jvm-*/
+yano-x-jvm-*.zip
+
+# Per-example private Yano home: config copy, symlinks, chain data, logs
+.yano/
+
+# Java
+target/
+
+# Node
+node_modules/
+
+# Runtime noise
+yaci_error.log
+
+# Editors / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
