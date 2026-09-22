@@ -1,0 +1,20 @@
+# Chain definitions for example 09 - anchor and verify.
+#
+# A plain ordered-log. The interesting part of this example is not the state
+# machine; it is that the verifier never talks to this chain at all.
+yano:
+  app-chain:
+    chains[0]:
+      chain-id: "evidence-chain"
+      state-machine: ordered-log
+
+      state:
+        commitment-profile: mpf-blake2b256-v1
+        format-fingerprint: 91ee14091200f1e24659112d640e877e9177779dcc81dd06117f013e9190082b
+        genesis-id: 96a8f68840c4ce4fef5dad89fd0046d6e8b972a5beb1d8dc4a55a881ad0f1e6b
+
+      membership:
+        mode: static
+
+      block:
+        interval-ms: 200

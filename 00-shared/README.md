@@ -81,6 +81,7 @@ Keep these distinct so examples can run at the same time.
 | 02 — service registry | 7110–7112 | 13410–13412 |
 | 03 — batch release | 7130–7132 | 13430–13432 |
 | 04 — catalyst disbursement | 7140–7142 | 13440–13442 |
+| 09 — anchor and verify | 7150–7152 | 13450–13452 |
 
 ### Environment
 

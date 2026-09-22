@@ -184,7 +184,7 @@ Deleting releases the key, and the next writer owns it — including a rival.
   state machine, not an off-chain convention.
 - **Ownership is per member key, not per organization.** One organization
   running two nodes has two owners. Tying entries to a business identity needs
-  role-aware authorization (example 12).
+  role-aware authorization (example 03).
 - **This verifies the root, not the lookup.** The application proves that a
   threshold of members committed to state root R at height H. Binding *this
   key's value* to R is the MPF inclusion proof, which the shipped Java verifier

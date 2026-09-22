@@ -151,19 +151,21 @@ angle deserves its own example.
 
 ## Tier 3 — Cardano L1
 
-### 🔜 9. Anchor and verify without trusting the node
-**Folder:** `09-anchoring-verify` · **Language:** Java (+ JS verifier) · **Capability:** `anchor:metadata`, `anchor:script`
+### ✅ 9. Anchor and verify without trusting the node
+**Folder:** `09-anchor-verify-java` · **Language:** Java · **Capability:** `anchor:script`
 
-Anchor a chain's state root to Cardano on devnet, then run a standalone
-verifier that reads the anchor transaction from L1, extracts the `state_root`,
-and validates an MPF proof against it offline.
+A standalone verifier reads the anchor UTxO from Cardano, decodes its inline
+datum, and validates an MPF proof against the anchored root. It has no
+`AppChainClient` anywhere — a test asserts that structurally.
 
-*Demonstrates:* the whole trust proposition end to end — the verifier never
-asks a Yano node to vouch for anything. Also contrasts metadata anchoring
-(fund a wallet, done) with Plutus V3 script anchoring (threshold-co-signed,
-validator-enforced datum chain).
+*Demonstrates:* the whole trust proposition end to end. The anchor datum
+carries not only the state root but **the member set and threshold**, so the
+verifier is not told separately who was allowed to sign — Cardano carries it.
+Tampered record, wrong height, wrong root and wrong chain are each refused by a
+different named check.
 
-*This is arguably the single most important example in the repo.*
+*Answers the question the other examples leave open:* 01 trusts a peer member,
+02 trusts keys pinned in a file, this trusts Cardano.
 
 ### 💡 10. React to a Cardano payment
 **Capability:** `observer:address-deposit`, `l1:slot-feed`

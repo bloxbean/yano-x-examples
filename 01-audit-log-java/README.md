@@ -143,7 +143,7 @@ from the extracted distribution without modifying it. See
   stores every record. Log hashes and references, not documents.
 - **The sender is a node, not a person.** The log proves which *member* relayed
   an entry. Proving that Alice personally approved something needs a
-  business-actor signature — a different capability (example 12).
+  business-actor signature — a different capability (example 03).
 - **Canonical bytes matter.** `AccessEvent` writes its fields in a fixed order
   so the same logical event always produces the same bytes, and therefore the
   same message id.

@@ -19,6 +19,7 @@ show that an app chain is ordinary infrastructure you talk to over HTTP.
 | [02](02-service-registry-js/) | Consortium service registry | JavaScript | Only the owner can change an entry — and an app verifies answers for itself, with no SDK |
 | [03](03-batch-release-java/) | Pharmaceutical batch release | Java | Named people sign, not nodes — multi-stage QC/QA/QP approval, role replacement, Cardano anchoring |
 | [04](04-catalyst-disbursement-java/) | Catalyst milestone disbursement | Java | The approved hash **is** the Cardano transaction id — approve off-chain, then pay exactly what was approved |
+| [09](09-anchor-verify-java/) | Anchor and verify | Java | A verifier that reads **Cardano and nothing else** — no Yano node is asked anything |
 
 The full catalog of planned examples, grouped from foundations through Cardano
 anchoring to custom plugins, is in **[USE_CASES.md](USE_CASES.md)**.
@@ -76,6 +77,7 @@ pom.xml              aggregator — lets an IDE see every Java example at once
 02-service-registry-js/
 03-batch-release-java/
 04-catalyst-disbursement-java/
+09-anchor-verify-java/
 yano-x-jvm-*/        the extracted distribution (not committed)
 ```
 

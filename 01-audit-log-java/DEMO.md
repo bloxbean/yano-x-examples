@@ -144,7 +144,7 @@ Worth saying out loud so nobody oversells it:
   participation. These are three parties who agreed to run this together.
 - **"Submitted by" is the node, not the person.** The chain proves which
   *member* relayed an entry. It does not prove that Alice personally approved
-  it. That needs business-actor signatures — example 12.
+  it. That needs business-actor signatures — example 03.
 - **Demo keys, local devnet, disposable data.** Not a deployment posture.
 
 ---
