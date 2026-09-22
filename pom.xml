@@ -30,5 +30,6 @@
   <modules>
     <module>01-audit-log-java</module>
     <module>03-batch-release-java</module>
+    <module>04-catalyst-disbursement-java</module>
   </modules>
 </project>

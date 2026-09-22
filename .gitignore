@@ -19,3 +19,6 @@ yaci_error.log
 *.swp
 .idea/
 .vscode/
+
+# Prepared payout transactions (example 04) — rebuilt on demand
+.payouts/

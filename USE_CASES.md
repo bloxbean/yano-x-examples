@@ -176,7 +176,24 @@ against its own canonical L1 view before co-signing.
 and rollback safety. Note the framework's own caveat: trusted-member
 integration infrastructure, not an adversarial bridge.
 
-### 💡 11. Net balances and settle on L1
+### ✅ 11. Catalyst milestone disbursement
+**Folder:** `04-catalyst-disbursement-java` · **Language:** Java · **Capability:** `state:role-approvals`, Cardano tx submission
+
+A fund pays a project when reviewers from two distinct organizations accept a
+milestone. What they approve is the payout **transaction's id** — which is the
+Blake2b-256 hash of its body — so the approval names exactly one payment.
+
+*Demonstrates:* closing the gap between "approved" and "paid". The treasury key
+signs only after approval (witnesses sit outside the hashed body, so the id is
+stable), and a payout altered after approval is refused without any rule that
+mentions amounts. An auditor compares the on-chain txid with the approval record
+and needs to trust neither side.
+
+*Also shows* the boundary: this is authorization, not enforcement — nothing stops
+the key holder paying unapproved. On-chain enforcement would need a Plutus
+validator checking an MPF proof against an anchored root.
+
+### 💡 11b. Net balances and settle on L1
 **Capability:** `state:balances` + `executor:cardano-payment` *(optional bundle)*
 
 A settlement job nets high-frequency micro-receipts every anchor interval and

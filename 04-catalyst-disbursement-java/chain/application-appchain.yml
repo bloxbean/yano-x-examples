@@ -1,0 +1,31 @@
+# Chain definitions for example 04 - Catalyst milestone disbursement.
+#
+# Milestone reviewers authorize a payout. What they sign is the hash of a
+# Cardano transaction body - which IS that transaction's id - so the approval
+# record names the exact payment, and anyone can check it against L1.
+yano:
+  plugins:
+    allow-list:
+      - org.yanoproject.x.composite
+      - org.yanoproject.x.role-workflow
+
+  app-chain:
+    chains[0]:
+      chain-id: "disbursement-chain"
+      state-machine: role-approvals
+
+      state:
+        commitment-profile: mpf-blake2b256-v1
+        format-fingerprint: 91ee14091200f1e24659112d640e877e9177779dcc81dd06117f013e9190082b
+        genesis-id: 111be95cbc3570a89587debdaf596f20d2d3c70361851135769ea19631f67d19
+
+      membership:
+        mode: governed
+
+      block:
+        interval-ms: 200
+
+      machines:
+        composite:
+          roles:
+            maximum-mutation-lifetime-blocks: 18000
