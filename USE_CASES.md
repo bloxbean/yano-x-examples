@@ -1,7 +1,7 @@
 # Yano X Examples — Use Case Catalog
 
 A catalog of small, runnable examples that demonstrate what
-[Yano X](https://yano-x.io) app chains can do. Each entry names the capability
+[Yano X](https://yano-x.io) app ledgers can do. Each entry names the capability
 it exercises, the language it is written in, and — most importantly — **what it
 proves that a plain database or a plain blockchain would not**.
 
