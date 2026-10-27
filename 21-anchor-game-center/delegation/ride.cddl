@@ -1,0 +1,11 @@
+; One canonical CBOR value. Node checks encoding/shape and session authority; browser checks the race.
+root = opened / checkpoint / ride
+opened = { t: "open" }
+checkpoint = {
+  t: "split", id: tstr .size (3..20), pub: tstr .size 64,
+  n: uint, run: uint, cp: 0..16, frame: 0..9000, sig: tstr .size 128
+}
+ride = {
+  t: "run", id: tstr .size (3..20), pub: tstr .size 64, n: uint,
+  seed: tstr .size 32, inputs: tstr .size (0..32768), frames: 1200..9000, sig: tstr .size 128
+}

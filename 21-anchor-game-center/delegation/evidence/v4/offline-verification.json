@@ -1,0 +1,37 @@
+{
+  "verified" : true,
+  "messageId" : "073e7a46272774b7d838401a89f87b9e2f9dcd9d85216041146937dd8dc1adc8",
+  "chainId" : "neon-rush-chain",
+  "height" : 8,
+  "generationId" : "d781da05292306ba5ff77bb4bc987015ca81003b27b07d09ed706662d66b757f",
+  "subjectType" : "topic-policy-v1",
+  "trust" : "CALLER_PINNED_BLOCK_AND_PARENT_ROOT",
+  "availability" : "NOT_PROVEN",
+  "outcome" : {
+    "kind" : "POLICY",
+    "policy" : {
+      "writers" : {
+        "keys" : {
+          "threshold" : 1,
+          "keys" : [ "a9ff3b936770162ed84d81b5ad0e6c0b5fa4bb396d61ba1aa837c24d248be24b" ]
+        }
+      },
+      "delegate" : [ "a9ff3b936770162ed84d81b5ad0e6c0b5fa4bb396d61ba1aa837c24d248be24b" ],
+      "maxDelegationMs" : 3600000,
+      "schema" : "4c7c6732977a8fb971e13200d87f39679634bc07e7b5499c8e87aa24e8de5b50",
+      "maxPayloadBytes" : 40000,
+      "retired" : false
+    },
+    "configRevision" : 1,
+    "sources" : [ {
+      "name" : "games/",
+      "revision" : 1
+    }, {
+      "name" : "games/neon-rush/",
+      "revision" : 1
+    } ]
+  },
+  "writerKind" : "delegated",
+  "signers" : [ "c3d05a3176d8828d5df93a3fa2bfb1b61bff17d22e84e450aca1236ee69f92d0" ],
+  "issuer" : "a9ff3b936770162ed84d81b5ad0e6c0b5fa4bb396d61ba1aa837c24d248be24b"
+}

@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sealed Duels</title>
+  <meta name="description" content="Commit–reveal rocket duels on a Yano X app ledger: moves stay hidden until both are sealed, and the dice come from both players' secrets.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Crect x='2' y='4' width='6' height='5' rx='1' fill='%23a78bff'/%3E%3Cpath d='M3 4V3a2 2 0 0 1 4 0v1' stroke='%23a78bff' fill='none'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="../shared/base.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <a class="back" id="back" href="../">← Game center</a>
+    <div class="duel-logo">SEALED DUELS</div>
+    <div class="vs" id="vs">Lobby</div>
+    <div class="chips">
+      <span class="chip edition" id="edition"></span>
+      <span class="chip fast" title="From your click to 'final' in this browser">your last seal <b id="lat">—</b></span>
+      <span class="chip">finality <b id="fin">—</b></span>
+    </div>
+  </header>
+  <div class="banner" id="banner" hidden></div>
+  <div class="main">
+    <div class="stage">
+      <div class="arena">
+        <canvas id="arena" aria-label="Duel arena"></canvas>
+        <div class="phase" id="phase" hidden><div class="round" id="round"></div><div class="what" id="what"></div>
+          <div class="sub" id="sub"></div></div>
+        <div class="outcome" id="outcome"></div>
+        <div class="lobby-panel" id="lobby">
+          <h2>Duel lobby</h2>
+          <p class="small">Challenge anyone, or accept an open challenge. The first valid accept on the ledger wins it.</p>
+          <div class="post">
+            <label class="small">Best of <select id="rounds"></select></label>
+            <button class="btn primary" id="challenge">Post a challenge</button>
+          </div>
+          <h3>Open challenges</h3>
+          <ul class="list" id="open"></ul>
+          <h3>Duels this hour</h3>
+          <ul class="list" id="live"></ul>
+        </div>
+      </div>
+      <div class="hand" id="hand" hidden></div>
+    </div>
+    <aside class="side">
+      <div class="card">
+        <h3>Commander</h3>
+        <div id="me-empty" class="small">Not signed in. <button class="link" id="open-auth">Sign in or create one</button></div>
+        <div id="me" hidden>
+          <div class="me">
+            <div class="avatar" id="avatar">?</div>
+            <div>
+              <div><b id="me-name"></b> <span class="badge good">profile on ledger</span></div>
+              <div class="small mono" id="me-key"></div>
+            </div>
+          </div>
+          <div class="me-row">
+            <label class="small">Relay through <select id="relay"></select></label>
+            <button class="link" id="signout">Sign out</button>
+          </div>
+        </div>
+      </div>
+      <div class="card" id="duel-card" hidden>
+        <h3>This duel</h3>
+        <div class="small" id="duel-info"></div>
+        <div class="row"><a class="btn" id="to-lobby" href="#">Back to the lobby</a></div>
+      </div>
+      <div class="card" id="rules-card">
+        <h3>Who runs the rules</h3>
+        <div class="small" id="rules"></div>
+        <div class="row" id="prove-row" hidden><button class="btn" id="prove-duel">Prove this duel</button></div>
+      </div>
+      <div class="card">
+        <h3>How a round works</h3>
+        <ol class="howto small">
+          <li><b>Seal.</b> You post <code>hash(move ‖ secret)</code>; your move stays hidden.</li>
+          <li><b>Reveal.</b> Once both seals are final, both moves are revealed and checked against the seals.</li>
+          <li><b>Dice.</b> BLAKE2b of both secrets rolls the die; a 6 is a critical hit.</li>
+          <li><b>Deadlines.</b> No seal within 30 s, or no reveal within 15 s of block time, forfeits the round.</li>
+        </ol>
+      </div>
+      <div class="card">
+        <h3>On the ledger</h3>
+        <ul class="log" id="log"></ul>
+      </div>
+      <div class="card">
+        <h3>Fair dice</h3>
+        <div class="dice"><div class="die" id="die">?</div>
+          <div class="small" id="dice-note">Each round’s die comes from both players’ secrets together. Neither player — nor any member — can steer it.</div></div>
+      </div>
+    </aside>
+  </div>
+</div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

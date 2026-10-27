@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Anchor Galaxy</title>
+  <meta name="description" content="A real-time space conquest game on Yano X app ledgers, finalized in about a second and sealed on Cardano.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Ccircle cx='5' cy='5' r='4' fill='%233ee6ff'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="../shared/base.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <a class="back" id="back" href="../">← Game center</a>
+    <div class="logo"><span class="orb"></span>ANCHOR GALAXY</div>
+    <div class="round" id="round">connecting…</div>
+    <div class="chips">
+      <span class="chip fast" title="From your click to 'final' in this browser">your last move <b id="lat">—</b></span>
+      <span class="chip"><span class="live"></span>moves/s <b id="mps">0</b></span>
+      <span class="chip">block <b id="blk">—</b></span>
+      <span class="chip">finality <b id="fin">—</b></span>
+    </div>
+  </header>
+
+  <div class="banner" id="banner" hidden></div>
+
+  <div class="main">
+    <div class="stage" id="stage">
+      <canvas id="sky" aria-label="Galaxy map"></canvas>
+      <div class="hud-bottom">
+        <div class="ratio" id="mode" role="radiogroup" aria-label="Tool">
+          <button data-mode="command" class="on" role="radio" aria-checked="true">Command</button>
+          <button data-mode="inspect" role="radio" aria-checked="false">Inspect</button>
+        </div>
+        <div class="ratio" id="ratio" role="radiogroup" aria-label="Fleet size"></div>
+        <div class="hint" id="hint">Drag from your planet to any planet to launch a fleet</div>
+        <button class="btn primary" id="join" hidden>Join this round</button>
+      </div>
+    </div>
+
+    <aside class="side">
+      <div class="card">
+        <h3>Commander</h3>
+        <div id="me-empty" class="small">Not signed in. <button class="link" id="open-auth">Sign in or create one</button></div>
+        <div id="me" hidden>
+          <div class="me">
+            <div class="avatar" id="avatar">?</div>
+            <div>
+              <div><b id="me-name"></b> <span class="badge good">profile on ledger</span></div>
+              <div class="small mono" id="me-key"></div>
+            </div>
+          </div>
+          <div class="me-row">
+            <label class="small">Relay through <select id="relay"></select></label>
+            <span><button class="link" id="prove-me">Prove my profile</button> ·
+              <button class="link" id="signout">Sign out</button></span>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Galaxy control</h3>
+        <ul class="board" id="board"></ul>
+      </div>
+      <div class="card">
+        <h3>Cardano anchor</h3>
+        <div class="small" id="anchor">Waiting for the first seal…</div>
+        <div class="bar"><span id="seal-bar"></span></div>
+      </div>
+      <div class="card">
+        <h3>Ledger feed</h3>
+        <ul class="feed" id="feed"></ul>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<div class="overlay" id="results" hidden>
+  <div class="panel results">
+    <h2 id="results-title">Round complete</h2>
+    <ol class="podium" id="podium"></ol>
+    <p class="small" id="results-note"></p>
+    <div class="row"><button class="btn primary" id="results-close">Next round</button></div>
+  </div>
+</div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

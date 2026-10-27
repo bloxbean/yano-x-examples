@@ -1,0 +1,84 @@
+# Four chains on the same members:
+#
+#   orders-chain             the stock ordered-log machine for the unprotected games;
+#                            the game rules run in the browser.
+#   authenticated-map-chain  the stock authenticated-map machine with the
+#                            showcase's four collections. Commander profiles go
+#                            in `attachments` (owner-controlled, opaque values).
+#   duels-chain              the example's own sealed-duels machine (plugin/).
+#                            The members run the duel rules: broken moves are
+#                            refused at admission and every duel is committed
+#                            to the state root. Added later to a running
+#                            cluster with ./cluster migrate (see the README).
+#   neon-rush-chain          fresh governed OrderedLog chain; topic policy, schema
+#                            and delegated session admission protect Neon Rush.
+#
+# The authenticated-map genesis depends on the member keys, so ./cluster
+# generates it on start with the release's own generator and hands it to each
+# node as a per-node property overlay.
+yano:
+  plugins:
+    # Validator plugins are trusted consensus code: authenticated-map only
+    # resolves the reference validator bundle when it is allow-listed.
+    allow-list:
+      - org.yanoproject.x.stdlib
+      - org.yanoproject.x.authenticated-map-validators
+      - org.yanoproject.x.role-workflow
+      - org.yanoproject.x.composite
+      # The example's own state machine: plugin/build/libs/sealed-duels-yano-plugin.jar,
+      # staged by ./cluster into .yano/node-plugins with the release's plugins.
+      - plugin-bundle.sealed-duels
+  app-chain:
+    chains[0]:
+      chain-id: "orders-chain"
+      state-machine: ordered-log
+      state:
+        commitment-profile: mpf-blake2b256-v1
+        format-fingerprint: 91ee14091200f1e24659112d640e877e9177779dcc81dd06117f013e9190082b
+        # sha256("yano-x-examples/21-anchor-galaxy-game/orders-chain")
+        genesis-id: 1bf0fea7cce35be0a399342651057109ebb769efb0f37894cfa6fe2c61dfe220
+      membership:
+        mode: static
+      block:
+        interval-ms: 1000
+    chains[1]:
+      chain-id: "authenticated-map-chain"
+      state-machine: authenticated-map
+      membership:
+        mode: governed
+      block:
+        interval-ms: 1000
+    chains[2]:
+      chain-id: "duels-chain"
+      state-machine: sealed-duels
+      state:
+        commitment-profile: mpf-blake2b256-v1
+        format-fingerprint: 91ee14091200f1e24659112d640e877e9177779dcc81dd06117f013e9190082b
+        # sha256("yano-x-examples/21-anchor-game-center/duels-chain")
+        genesis-id: 2da4a16323b4f3399bc7e6afc297b2cd7b7c9b6c4fca26c314e93c98ec08bb06
+      membership:
+        mode: static
+      block:
+        interval-ms: 1000
+
+    # ADR-038 reference: a fresh chain identity. Never change a retained orders-chain genesis.
+    chains[3]:
+      chain-id: "neon-rush-chain"
+      state-machine: ordered-log
+      state:
+        commitment-profile: mpf-blake2b256-v1
+        format-fingerprint: 91ee14091200f1e24659112d640e877e9177779dcc81dd06117f013e9190082b
+        # sha256("yano-x-examples/21-anchor-game-center/neon-rush-chain/topics-v1")
+        genesis-id: 22a0f2c31aa7d97a8e9f818b9ad0ca7649943d494095454d8f266afd479d306a
+      membership:
+        mode: governed
+      block:
+        interval-ms: 1000
+      topics:
+        mode: enabled
+        creation:
+          governance: true
+          open-claims: false
+        unregistered-topics: reject
+        max-delegation-ms: 3600000
+        activation-lag: 2

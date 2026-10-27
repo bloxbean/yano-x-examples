@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Anchor Arcade</title>
+  <meta name="description" content="A replay-verified arcade shooter on Yano X app ledgers: you submit inputs, every browser replays them, and the leaderboard is sealed on Cardano.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M5 0L8 7H2z' fill='%23ff4fd8'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="../shared/base.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <a class="back" id="back" href="../">← Game center</a>
+    <div class="logo arcade-logo">ANCHOR ARCADE</div>
+    <div class="field" id="field">connecting…</div>
+    <div class="chips">
+      <span class="chip">your best <b id="best">—</b></span>
+      <span class="chip">verified runs <b id="runs">0</b></span>
+      <span class="chip">block <b id="blk">—</b></span>
+      <span class="chip">finality <b id="fin">—</b></span>
+    </div>
+  </header>
+  <div class="banner" id="banner" hidden></div>
+
+  <div class="main">
+    <div class="stage" id="stage">
+      <canvas id="game" aria-label="Arcade"></canvas>
+      <div class="hud" id="hud" hidden>
+        <div class="score" id="score">0</div>
+        <div class="sub">combo <b id="combo">×1</b> · crashes <span id="crashes">0</span></div>
+      </div>
+      <div class="timer" id="timer" hidden><div class="t" id="time">1:00</div><div class="rec">REC INPUTS</div></div>
+      <div class="watching" id="watching" hidden></div>
+      <div class="countdown" id="countdown" hidden></div>
+
+      <div class="prompt" id="prompt">
+        <div class="prompt-title">Today’s field</div>
+        <div class="prompt-field" id="prompt-field">…</div>
+        <button class="btn primary play" id="play">Play this field</button>
+        <div class="small" id="prompt-note">60 seconds · ← → turn · ↑ thrust · space fire</div>
+      </div>
+
+      <div class="touch" id="touch" hidden>
+        <button data-bit="1" aria-label="Turn left">◀</button>
+        <button data-bit="2" aria-label="Turn right">▶</button>
+        <button data-bit="4" aria-label="Thrust">▲</button>
+        <button data-bit="8" class="fire" aria-label="Fire">●</button>
+      </div>
+    </div>
+
+    <aside class="side">
+      <div class="card">
+        <h3>Commander</h3>
+        <div id="me-empty" class="small">Not signed in. <button class="link" id="open-auth">Sign in or create one</button></div>
+        <div id="me" hidden>
+          <div class="me">
+            <div class="avatar" id="avatar">?</div>
+            <div>
+              <div><b id="me-name"></b> <span class="badge good">profile on ledger</span></div>
+              <div class="small mono" id="me-key"></div>
+            </div>
+          </div>
+          <div class="me-row">
+            <label class="small">Relay through <select id="relay"></select></label>
+            <span><button class="link" id="prove-me">Prove my profile</button> ·
+              <button class="link" id="signout">Sign out</button></span>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>This field’s leaderboard</h3>
+        <ul class="board" id="board"></ul>
+        <div class="small legend">✓ replayed in this browser from the signed inputs on the ledger ·
+          ▶ race their ghost · click a name to prove the run</div>
+      </div>
+      <div class="card">
+        <h3>Cardano anchor</h3>
+        <div class="small" id="anchor">Waiting for the first seal…</div>
+      </div>
+      <div class="card">
+        <h3>Why it can’t be faked</h3>
+        <ol class="pipe">
+          <li><span>①</span><span><b>Seed from the ledger.</b> Each field’s rocks come from the block that opened it, so nobody can practise it early.</span></li>
+          <li><span>②</span><span><b>Inputs, not scores.</b> Your keypresses are signed by your commander key and finalized.</span></li>
+          <li><span>③</span><span><b>Every browser replays.</b> A run counts only if its inputs reach exactly the score you claimed.</span></li>
+          <li><span>④</span><span><b>Sealed on Cardano.</b> The run is in the anchored state; prove it any time.</span></li>
+        </ol>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<div class="overlay" id="end" hidden>
+  <div class="panel end-panel">
+    <h2 class="end-title">Run complete</h2>
+    <div class="big" id="final">0</div>
+    <div class="small">Your score isn’t trusted until every browser can replay it.</div>
+    <ol class="steps run-steps" id="steps"></ol>
+    <div class="rank" id="rank" hidden></div>
+    <div class="row"><button class="btn primary" id="again">Play again</button>
+      <button class="btn" id="watch-mine">Watch my replay</button>
+      <button class="btn" id="close-end">Close</button></div>
+  </div>
+</div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

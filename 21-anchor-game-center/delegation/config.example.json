@@ -1,0 +1,9 @@
+{
+  "chainId": "neon-rush-chain",
+  "generationId": "REPLACE_WITH_CHAIN_STATUS_GENERATION_ID",
+  "profileGenerationId": "REPLACE_WITH_PROFILE_CHAIN_STATUS_GENERATION_ID",
+  "issuerPublicKey": "REPLACE_WITH_ISSUER_PUBLIC_KEY",
+  "peer": "http://127.0.0.1:7210",
+  "port": 8788,
+  "origins": ["http://localhost:8787", "http://127.0.0.1:8787"]
+}

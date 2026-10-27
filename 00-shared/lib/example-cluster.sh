@@ -117,7 +117,7 @@ example_cluster() {
   [ $# -gt 0 ] || die "usage: ./cluster <start [N]|status|stop|clean|submit|logs|...>"
 
   # The node refuses a symlinked plugin directory; hand it the real path.
-  export YANO_PLUGINS_DIRECTORY="$dist/plugins"
+  export YANO_PLUGINS_DIRECTORY="${EXAMPLE_PLUGINS_DIRECTORY:-$dist/plugins}"
   export YANO_HOME="$home"
 
   local -a args=("$1"); shift

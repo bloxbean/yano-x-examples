@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Land Rush</title>
+  <meta name="description" content="Claim territory first-come on a Yano X app ledger: the members themselves refuse a second claim, and every tile — claimed or free — can be proven against Cardano.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M5 .5l4 2.3v4.4L5 9.5 1 7.2V2.8z' fill='%237dff6a'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="../shared/base.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <a class="back" id="back" href="../">← Game center</a>
+    <div class="land-logo">LAND RUSH</div>
+    <div class="season" id="season">connecting…</div>
+    <div class="chips">
+      <span class="chip fast" title="From your click to 'final' in this browser">your last claim <b id="lat">—</b></span>
+      <span class="chip"><span class="live"></span>claims/s <b id="cps">0.0</b></span>
+      <span class="chip">finality <b id="fin">—</b></span>
+    </div>
+  </header>
+  <div class="banner" id="banner" hidden></div>
+  <div class="main">
+    <div class="stage">
+      <canvas id="map" aria-label="Land map"></canvas>
+      <div class="hud">
+        <div class="modes" id="modes" role="radiogroup" aria-label="Tool">
+          <button class="on" data-m="claim" role="radio" aria-checked="true">Claim</button>
+          <button data-m="inspect" role="radio" aria-checked="false">Inspect</button>
+        </div>
+        <div class="hint" id="hint"></div>
+      </div>
+    </div>
+    <aside class="side">
+      <div class="card">
+        <h3>Commander</h3>
+        <div id="me-empty" class="small">Not signed in. <button class="link" id="open-auth">Sign in or create one</button></div>
+        <div id="me" hidden>
+          <div class="me">
+            <div class="avatar" id="avatar">?</div>
+            <div>
+              <div><b id="me-name"></b> <span class="badge good">profile on ledger</span></div>
+              <div class="small mono" id="me-sub"></div>
+            </div>
+          </div>
+          <div class="small" style="margin-top:10px" id="stamina-label">Stamina</div>
+          <div class="stamina" id="stamina"></div>
+          <div class="me-row">
+            <label class="small">Relay through <select id="relay"></select></label>
+            <span><button class="link" id="signout">Sign out</button></span>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Season standings</h3>
+        <ul class="board" id="board"></ul>
+        <div class="small" style="margin-top:6px" id="score-rule"></div>
+      </div>
+      <div class="card">
+        <h3>Claims on the ledger</h3>
+        <ul class="feed" id="feed"></ul>
+      </div>
+      <div class="card">
+        <h3>Cardano anchor</h3>
+        <div class="small" id="anchor">Waiting for the first seal…</div>
+      </div>
+      <div class="card">
+        <h3>Terrain</h3>
+        <div class="legend" id="legend"></div>
+        <div class="small" style="margin-top:8px">Every claim is a <code>PUT_IF_ABSENT</code> on <code>authenticated-map-chain</code>:
+          the members themselves refuse a second claim on a tile.</div>
+      </div>
+    </aside>
+  </div>
+</div>
+<div class="overlay" id="results" hidden>
+  <div class="panel results">
+    <h2 id="results-title">Season complete</h2>
+    <ol class="podium" id="podium"></ol>
+    <p class="small" id="results-note"></p>
+    <div class="row"><button class="btn primary" id="results-close">On to the next season</button></div>
+  </div>
+</div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
