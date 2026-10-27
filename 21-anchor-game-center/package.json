@@ -1,0 +1,15 @@
+{
+  "name": "yano-x-anchor-game-center",
+  "version": "1.0.0",
+  "description": "Yano X example 21 \u2014 a game center: one commander account, several games on app ledgers, sealed on Cardano",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node scripts/check-topic-client.mjs && node --no-warnings test/run.mjs && node --test test/topics/*.test.mjs",
+    "start": "node serve.mjs",
+    "delegation": "node delegation/server.mjs"
+  }
+}

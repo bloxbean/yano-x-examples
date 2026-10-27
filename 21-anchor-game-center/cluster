@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+# Start, inspect and stop the local game center's ledgers: orders-chain,
+# authenticated-map-chain and duels-chain (the example's own plugin).
+#
+#   ./cluster start 3     three members on a private devnet (HTTP 7210..7212)
+#   ./cluster status      per-member tip, state root and cross-member agreement
+#   ./cluster stop        stop the members, keep the data
+#   ./cluster migrate     after adding a chain to chain/application-appchain.yml:
+#                         back up .yano/data and record the new chain in the
+#                         cluster's identity marker (members must be stopped)
+#   ./cluster clean       stop and wipe .yano/
+#
+# Build the plugin first: (cd plugin && ./gradlew build)
+#
+# Then: YANO_NODES=http://127.0.0.1:7210,http://127.0.0.1:7211,http://127.0.0.1:7212 node serve.mjs
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd -P)"
+
+export EXAMPLE_HTTP_BASE="${EXAMPLE_HTTP_BASE:-7210}"
+export EXAMPLE_SERVER_BASE="${EXAMPLE_SERVER_BASE:-13510}"
+
+. "$HERE/../00-shared/lib/example-cluster.sh"
+
+# authenticated-map-chain is chains[1] in chain/application-appchain.yml.
+AUTHMAP_INDEX=1
+AUTHMAP_GENERATOR=org.yanoproject.x.showcase.ShowcaseAuthenticatedMapConfig
+
+# Generate the authenticated-map genesis for this membership and write one
+# owner-only property overlay per node, which the launcher loads on start.
+#   $1 = node count
+prepare_authmap_overlays() {
+  local nodes="$1" dist members threshold dir i generated
+  dist="$(resolve_distribution "$(cd "$HERE/.." && pwd -P)")"
+  members="$("$dist/appchain-cluster/cluster.sh" keys "$nodes" | awk 'NR > 1 {print $3}' | paste -sd, -)"
+  threshold=$(( nodes / 2 + 1 ))   # the launcher's default majority
+  generated="$(java -cp "$dist/yano.jar:$dist/plugins/*" "$AUTHMAP_GENERATOR" \
+      --validator-bundle "$(ls "$dist"/plugins/yano-x-authenticated-map-validators-bundle-*.jar)" \
+      --chain-id authenticated-map-chain --members "$members" --threshold "$threshold")" \
+    || die "could not generate the authenticated-map genesis"
+
+  dir="$HERE/.yano/node-config"
+  rm -rf "$dir"
+  mkdir -p "$dir"
+  chmod 700 "$dir"
+  for ((i = 0; i < nodes; i++)); do
+    {
+      printf 'config_ordinal=275\n'
+      printf '%s\n' "$generated" | sed "s/^yano\.app-chain\.chains\[[0-9]*\]\./yano.app-chain.chains[$AUTHMAP_INDEX]./"
+    } > "$dir/node$i.properties"
+    chmod 600 "$dir/node$i.properties"
+  done
+  export YANO_CLUSTER_NODE_CONFIG_DIR="$dir"
+}
+
+PLUGIN_JAR="$HERE/plugin/build/libs/sealed-duels-yano-plugin.jar"
+PLUGINS_DIR="$HERE/.yano/node-plugins"
+
+# The members load plugins from one real directory. Stage the release's plugins
+# plus this example's JAR there, so the extracted distribution stays untouched.
+# Every member must run the byte-identical JAR: it decides the duels-chain roots.
+stage_plugins() {
+  local dist jar
+  dist="$(resolve_distribution "$(cd "$HERE/.." && pwd -P)")"
+  [ -f "$PLUGIN_JAR" ] || die "build the plugin first: (cd plugin && ./gradlew build)"
+  mkdir -p "$PLUGINS_DIR"
+  for jar in "$PLUGINS_DIR"/*.jar; do
+    [ -e "$jar" ] || continue
+    [ -f "$dist/plugins/${jar##*/}" ] || [ "${jar##*/}" = "${PLUGIN_JAR##*/}" ] || rm -f "$jar"
+  done
+  for jar in "$dist"/plugins/*.jar "$PLUGIN_JAR"; do
+    cmp -s "$jar" "$PLUGINS_DIR/${jar##*/}" || cp "$jar" "$PLUGINS_DIR/"
+  done
+  note "  plugin: $(shasum -a 256 "$PLUGINS_DIR/${PLUGIN_JAR##*/}" | cut -c1-16)…  ${PLUGIN_JAR##*/}"
+}
+
+# Add chains to a cluster that already has state, keeping the existing chains.
+#
+# The launcher pins the chain list in .yano/data/cluster-appchain-identity.json
+# and refuses to start when the configuration names a different list. Chains
+# are independent (own genesis id, store and history), so appending one is safe:
+# this checks that the configured chains are the recorded ones plus new ones at
+# the end, backs up .yano/data and rewrites the marker in the launcher's
+# canonical form. Removing, renaming or reordering a chain is refused.
+migrate() {
+  local data="$HERE/.yano/data" pid backup
+  [ -f "$data/cluster-appchain-identity.json" ] || die "no retained cluster in $data: just ./cluster start"
+  for pid in "$data"/node*.pid; do
+    [ -f "$pid" ] || continue
+    if kill -0 "$(cat "$pid")" 2>/dev/null; then die "stop the members first: ./cluster stop"; fi
+  done
+  backup="$HERE/.yano/backups/data-$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p "$HERE/.yano/backups"
+  chmod 700 "$HERE/.yano/backups"
+  python3 - "$data/cluster-appchain-identity.json" "$HERE/chain/application-appchain.yml" "$backup" "$data" <<'PY'
+import json, os, re, shutil, sys
+
+marker, config, backup, data = sys.argv[1:]
+with open(marker, "rb") as f:
+    raw = f.read()
+document = json.loads(raw)
+if raw != (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode():
+    raise SystemExit("the identity marker is not in canonical form; inspect it by hand")
+recorded = document["chainIds"]
+configured = [m.group(1) for line in open(config) if not line.lstrip().startswith("#")
+              for m in [re.match(r'^ {6}chain-id:\s*"?([^"\s]+)"?', line)] if m]
+if configured == recorded:
+    print("  migrate: nothing to do, chains are " + ", ".join(recorded))
+    raise SystemExit(0)
+if configured[:len(recorded)] != recorded:
+    raise SystemExit("refusing: the configuration must keep " + ", ".join(recorded)
+                     + " in order and only append chains (configured: " + ", ".join(configured) + ")")
+anchor = document["anchor"]
+if "chainId" in anchor or "chainIds" in anchor:
+    raise SystemExit("refusing: anchoring is limited to selected chains; extend that selection by hand")
+shutil.copytree(data, backup, symlinks=True)
+document["chainIds"] = configured
+temp = marker + ".migrate"
+fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(fd, "wb") as f:
+    f.write((json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode())
+    f.flush()
+    os.fsync(f.fileno())
+os.replace(temp, marker)
+dirfd = os.open(os.path.dirname(marker), os.O_RDONLY)
+os.fsync(dirfd)
+os.close(dirfd)
+print("  migrate: backed up the data to " + backup)
+print("  migrate: chains are now " + ", ".join(configured) + " (added " + ", ".join(configured[len(recorded):]) + ")")
+print("  migrate: next, ./cluster start " + str(document["memberCount"]))
+PY
+}
+
+case "${1:-}" in
+  start)
+    nodes="${2:-3}"
+    case "$nodes" in ''|*[!0-9]*) nodes=3 ;; esac
+    prepare_authmap_overlays "$nodes"
+    stage_plugins
+    ;;
+  migrate)
+    migrate
+    exit 0
+    ;;
+  *)
+    [ -d "$HERE/.yano/node-config" ] && export YANO_CLUSTER_NODE_CONFIG_DIR="$HERE/.yano/node-config"
+    ;;
+esac
+[ -d "$PLUGINS_DIR" ] && export EXAMPLE_PLUGINS_DIRECTORY="$PLUGINS_DIR"
+
+example_cluster "$HERE" "$@"

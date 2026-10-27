@@ -1,0 +1,5 @@
+.yano/
+moto/topic-config.json
+delegation/config.json
+*.seed
+*.private.json

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Anchor Games</title>
+  <meta name="description" content="A game center on Yano X app ledgers: one commander account, several games, every move final in about a second and sealed on Cardano.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Ccircle cx='5' cy='5' r='4' fill='%233ee6ff'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="shared/base.css">
+  <link rel="stylesheet" href="hub.css">
+</head>
+<body>
+<canvas id="sky" aria-hidden="true"></canvas>
+<header class="top">
+  <div class="logo"><span class="orb"></span>ANCHOR GAMES</div>
+  <div class="chips">
+    <span class="chip"><span class="live"></span>block <b id="blk">—</b></span>
+    <span class="chip">finality <b id="fin">—</b></span>
+    <span class="chip">sealed on Cardano <b id="sealed">—</b></span>
+  </div>
+</header>
+<div class="banner" id="banner" hidden></div>
+
+<main class="hub">
+  <section class="hero">
+    <div>
+      <h1>One commander.<br><span>Every game.</span></h1>
+      <p>Games on a Yano X app ledger: every move is final in about a second, every browser computes the
+        same game, and the whole thing is sealed on Cardano behind the scenes. Sign in once — your commander
+        works in every game here, today’s and tomorrow’s.</p>
+    </div>
+    <div class="card commander">
+      <h3>Your commander</h3>
+      <div id="me-empty">
+        <p class="small">Pick a call sign and a password. Your password never leaves this browser.</p>
+        <div class="row"><button class="btn primary" id="create">Create commander</button>
+          <button class="btn" id="signin">Sign in</button></div>
+      </div>
+      <div id="me" hidden>
+        <div class="me">
+          <div class="avatar" id="avatar">?</div>
+          <div>
+            <div><b id="me-name"></b> <span class="badge good">profile on ledger</span></div>
+            <div class="small mono" id="me-key"></div>
+          </div>
+        </div>
+        <div class="me-row">
+          <span class="small">Ready for every game below.</span>
+          <span><button class="link" id="prove-me">Prove my profile</button> ·
+            <button class="link" id="signout">Sign out</button></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="games" id="games"></section>
+
+  <section class="how">
+    <div class="step"><b>Two app ledgers</b><span>Commanders live on <code>authenticated-map-chain</code>;
+      game moves go to <code>orders-chain</code>. Both are stock Yano X machines — no game code on the members.</span></div>
+    <div class="step"><b>Same game everywhere</b><span>Each game is a deterministic program over the finalized
+      log, so every browser shows the same outcome with no game server.</span></div>
+    <div class="step"><b>Sealed on Cardano</b><span>The members anchor each ledger’s state root on Cardano.
+      Any move, run or profile can be proven against it.</span></div>
+  </section>
+</main>
+<script type="module" src="hub.js"></script>
+</body>
+</html>

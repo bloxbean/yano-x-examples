@@ -1,0 +1,27 @@
+V4 evidence directory: /private/tmp/yano-neon-v4-eZArKe
+PASS fresh three-node devnet started
+PASS first governed block materializes genesis topic policy before CLI planning
+(node:46114) ExperimentalWarning: The Ed25519 Web Crypto API algorithm is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS governance namespace and owner-signed canonical ride schema activated
+PASS commander revision-one profile registered on real authenticated map
+PASS real service issued scoped credential and refused copied request/profile authentication
+PASS session-signed canonical ride accepted, read under original id, commander checked and inputs replayed
+PASS forged session signatures refused on all members
+PASS malformed frames refused on all members
+PASS replayed write proof refused on all members
+PASS expired proof refused on all members
+PASS schema-invalid ride refused on all members
+PASS out-of-scope credential refused on all members
+PASS ride block and parent have verified threshold certificates and identical roots on all members
+PASS complete delegated authorship verified offline against certificate-pinned block and parent root
+PASS old issuer credential refused after rotation
+PASS ride schema remains enforced after issuer rotation
+PASS new issuer authenticates and refreshed credential writes after rotation
+PASS threshold governance recovery replaces lost owner and new owner can update policy
+PASS two-member quorum finalizes another framed write while follower is stopped
+PASS restarted follower catches up the frame finalized while it was offline
+PASS profile chain also retains identical roots, generation and capability manifest on all members
+PASS three-node restart preserves original roots, finality, identity and committed recovery
+PASS ride schema remains enforced after recovery and restart
+PASS: /private/tmp/yano-neon-v4-eZArKe/report.json

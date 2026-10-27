@@ -1,0 +1,134 @@
+{
+  "startedAt": "2026-10-26T16:39:53.002Z",
+  "distribution": "/private/tmp/yano-neon-v4-eZArKe/distribution/yano-x-jvm-0.1.0-pre4",
+  "work": "/private/tmp/yano-neon-v4-eZArKe",
+  "checks": [
+    {
+      "name": "fresh three-node devnet started",
+      "evidence": true
+    },
+    {
+      "name": "first governed block materializes genesis topic policy before CLI planning",
+      "evidence": true
+    },
+    {
+      "name": "governance namespace and owner-signed canonical ride schema activated",
+      "evidence": true
+    },
+    {
+      "name": "commander revision-one profile registered on real authenticated map",
+      "evidence": true
+    },
+    {
+      "name": "real service issued scoped credential and refused copied request/profile authentication",
+      "evidence": true
+    },
+    {
+      "name": "session-signed canonical ride accepted, read under original id, commander checked and inputs replayed",
+      "evidence": {
+        "messageId": "073e7a46272774b7d838401a89f87b9e2f9dcd9d85216041146937dd8dc1adc8",
+        "frames": 2200,
+        "height": 8
+      }
+    },
+    {
+      "name": "forged session signatures refused on all members",
+      "evidence": "TOPIC_WRITER_DENIED"
+    },
+    {
+      "name": "malformed frames refused on all members",
+      "evidence": "TOPIC_FRAME_INVALID"
+    },
+    {
+      "name": "replayed write proof refused on all members",
+      "evidence": "TOPIC_PROOF_REPLAYED"
+    },
+    {
+      "name": "expired proof refused on all members",
+      "evidence": "TOPIC_PROOF_EXPIRED"
+    },
+    {
+      "name": "schema-invalid ride refused on all members",
+      "evidence": "TOPIC_SCHEMA_REJECTED"
+    },
+    {
+      "name": "out-of-scope credential refused on all members",
+      "evidence": "TOPIC_DELEGATION_INVALID"
+    },
+    {
+      "name": "ride block and parent have verified threshold certificates and identical roots on all members",
+      "evidence": true
+    },
+    {
+      "name": "complete delegated authorship verified offline against certificate-pinned block and parent root",
+      "evidence": true
+    },
+    {
+      "name": "old issuer credential refused after rotation",
+      "evidence": "TOPIC_DELEGATION_INVALID"
+    },
+    {
+      "name": "ride schema remains enforced after issuer rotation",
+      "evidence": "TOPIC_SCHEMA_REJECTED"
+    },
+    {
+      "name": "new issuer authenticates and refreshed credential writes after rotation",
+      "evidence": true
+    },
+    {
+      "name": "threshold governance recovery replaces lost owner and new owner can update policy",
+      "evidence": true
+    },
+    {
+      "name": "two-member quorum finalizes another framed write while follower is stopped",
+      "evidence": {
+        "messageId": "e72ec0bec4d43d7edd2f89701ecf9ae4e9c908d1e1307de1d6966dbb5d820606",
+        "height": 17
+      }
+    },
+    {
+      "name": "restarted follower catches up the frame finalized while it was offline",
+      "evidence": true
+    },
+    {
+      "name": "profile chain also retains identical roots, generation and capability manifest on all members",
+      "evidence": true
+    },
+    {
+      "name": "three-node restart preserves original roots, finality, identity and committed recovery",
+      "evidence": true
+    },
+    {
+      "name": "ride schema remains enforced after recovery and restart",
+      "evidence": "TOPIC_SCHEMA_REJECTED"
+    }
+  ],
+  "distributionZipSha256": "1cc44e322d7eec6d59f3ec81b747cf906cff2ab122bb4543b133a2024107e407",
+  "distributionJarSha256": "a93465df0a9f363caf4fc01e9c3b43065cd878462bc1f123ded9f39e5ed337c6",
+  "generationId": "d781da05292306ba5ff77bb4bc987015ca81003b27b07d09ed706662d66b757f",
+  "schemaHash": "4c7c6732977a8fb971e13200d87f39679634bc07e7b5499c8e87aa24e8de5b50",
+  "profileGenerationId": "b1c057d2173a575c4781aa785076db9d88a22248c843527907246e2f61b6c9b2",
+  "finalState": {
+    "profile": "mpf-blake2b256-v1",
+    "genesisId": "a05170e7d0c348dc83d0707cf5affd39ff0105dfa72be5c8bb710d8ab75ba1b9",
+    "formatFingerprint": "91ee14091200f1e24659112d640e877e9177779dcc81dd06117f013e9190082b",
+    "generationId": "d781da05292306ba5ff77bb4bc987015ca81003b27b07d09ed706662d66b757f",
+    "capabilityManifestDigest": "490dee14f150a17a02bd5e0028bbb2c977ed225741d2ac9c3b421efe850beddf",
+    "height": 17,
+    "stateRoot": "370e57904ad47ba5c6ef47b76051d84d309398f9326ec4de84acb9a866581a08",
+    "rideMessageId": "073e7a46272774b7d838401a89f87b9e2f9dcd9d85216041146937dd8dc1adc8",
+    "rideHeight": 8,
+    "rideIndex": 0
+  },
+  "profileChainState": {
+    "profile": "mpf-blake2b256-v1",
+    "genesisId": "91cc3c0defd388604db0282770507c73f65bed974913d55b694a9142ca23dadd",
+    "formatFingerprint": "91ee14091200f1e24659112d640e877e9177779dcc81dd06117f013e9190082b",
+    "generationId": "b1c057d2173a575c4781aa785076db9d88a22248c843527907246e2f61b6c9b2",
+    "capabilityManifestDigest": "c7f70717882b31d605037efc317a6fe20c388fd24434c6907ebb33ab825d56fd",
+    "height": 1,
+    "stateRoot": "f4fcfd52b05c7f42f9e6f92c99dc6869e67c8e8eb287e80846e65bd04fd90171"
+  },
+  "status": "PASS",
+  "completedAt": "2026-10-26T16:42:06.354Z"
+}

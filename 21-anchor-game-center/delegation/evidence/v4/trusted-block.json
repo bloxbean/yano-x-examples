@@ -1,0 +1,10 @@
+{
+  "chainId": "neon-rush-chain",
+  "profile": "mpf-blake2b256-v1",
+  "genesisId": "a05170e7d0c348dc83d0707cf5affd39ff0105dfa72be5c8bb710d8ab75ba1b9",
+  "height": 8,
+  "blockHash": "0c14ffca16022d67ac2f32525373548a8e4e4d9679f867d51e5cfbbacc36d950",
+  "messagesRoot": "073e7a46272774b7d838401a89f87b9e2f9dcd9d85216041146937dd8dc1adc8",
+  "parentStateRoot": "fc102ba78ba262dd6e16f42297aa8721741efcdd8058ad89d249b86dec0b94c4",
+  "timestamp": 1793032857317
+}

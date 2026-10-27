@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Neon Rush</title>
+  <meta name="description" content="A night-city motorbike time trial on a Yano X app ledger: the circuit comes from a block, every browser replays your ride, and rivals appear live from their checkpoint splits.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Ccircle cx='3' cy='7' r='2' fill='none' stroke='%23ff3fd0'/%3E%3Ccircle cx='8' cy='7' r='2' fill='none' stroke='%233ee6ff'/%3E%3Cpath d='M3 7L5 3H7L8 7' stroke='%23fff' fill='none'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="../shared/base.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <a class="back" id="back" href="../">← Game center</a>
+    <div class="moto-logo">NEON RUSH</div>
+    <div class="season" id="season">connecting…</div>
+    <div class="chips">
+      <span class="chip">your best <b id="best">—</b></span>
+      <span class="chip">verified rides <b id="rides">0</b></span>
+      <span class="chip">block <b id="blk">—</b></span>
+      <span class="chip">sealed on Cardano <b id="sealed">—</b></span>
+    </div>
+  </header>
+  <div class="banner" id="banner" hidden></div>
+  <div class="main">
+    <div class="stage" id="stage">
+      <canvas id="road" aria-label="The city circuit"></canvas>
+      <div class="hud" id="hud" hidden>
+        <div class="speedo"><b id="kmh">0</b><span>km/h</span></div>
+        <div class="laps"><div class="t" id="time">0:00.00</div><div class="small"><span id="lap">LAP 1/2</span> · crashes <span id="crashes">0</span></div></div>
+        <div class="split" id="split"></div>
+        <div class="draft" id="draft" hidden>SLIPSTREAM</div>
+      </div>
+      <div class="watching" id="watching" hidden></div>
+      <div class="countdown" id="countdown" hidden></div>
+      <div class="prompt" id="prompt">
+        <div class="prompt-title">Tonight’s circuit</div>
+        <div class="prompt-field" id="prompt-field">…</div>
+        <button class="btn primary play" id="play">Ride this circuit</button>
+        <div class="small" id="prompt-note">2 laps · ↑ throttle · ↓ brake · ← → lean · ride in a car’s slipstream for top speed</div>
+      </div>
+      <div class="end overlay-card" id="end" hidden>
+        <div class="end-time" id="final">0:00.00</div>
+        <ol class="steps" id="steps"></ol>
+        <div class="rank" id="rank" hidden></div>
+        <div class="row"><button class="btn primary" id="again">Ride again</button><button class="btn" id="close-end">Watch the city</button></div>
+      </div>
+      <div class="touch" id="touch" hidden>
+        <button data-bit="1" aria-label="Lean left">◀</button>
+        <button data-bit="8" aria-label="Brake">■</button>
+        <button data-bit="4" aria-label="Throttle" class="gas">▲</button>
+        <button data-bit="2" aria-label="Lean right">▶</button>
+      </div>
+    </div>
+    <aside class="side">
+      <div class="card">
+        <h3>Commander</h3>
+        <div id="me-empty" class="small">Not signed in. <button class="link" id="open-auth">Sign in or create one</button></div>
+        <div id="me" hidden>
+          <div class="me">
+            <div class="avatar" id="avatar">?</div>
+            <div>
+              <div><b id="me-name"></b> <span class="badge good">profile on ledger</span></div>
+              <div class="small mono" id="me-key"></div>
+            </div>
+          </div>
+          <div class="me-row">
+            <label class="small">Relay through <select id="relay"></select></label>
+            <button class="link" id="signout">Sign out</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Live on the circuit</h3>
+        <ul class="live" id="live"></ul>
+      </div>
+      <div class="card">
+        <h3>Fastest this season</h3>
+        <ol class="board" id="board"></ol>
+        <div class="small legend">✓ replayed in this browser from the signed inputs · ◐ race their ghost · ▶ watch · click a name to prove</div>
+      </div>
+      <div class="card">
+        <h3>Why the times are real</h3>
+        <ol class="howto small">
+          <li><b>A circuit nobody saw coming.</b> The streets, bends and traffic come from the state root of the block that opened the season.</li>
+          <li><b>Inputs, not times.</b> You submit every frame’s throttle, brake and lean, signed. Every browser replays them; the time is wherever the replay crosses the line.</li>
+          <li><b>Live in about a second.</b> Each checkpoint you pass is a signed split on the ledger — rivals see you on their screen almost at once.</li>
+          <li><b>Sealed on Cardano.</b> Prove any ride against the anchored root.</li>
+        </ol>
+      </div>
+    </aside>
+  </div>
+</div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

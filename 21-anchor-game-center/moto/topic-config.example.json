@@ -1,0 +1,7 @@
+{
+  "chainId": "neon-rush-chain",
+  "generationId": "REPLACE_WITH_CHAIN_STATUS_GENERATION_ID",
+  "scope": "games/neon-rush/",
+  "issuers": ["REPLACE_WITH_ISSUER_PUBLIC_KEY"],
+  "delegationEndpoint": "http://127.0.0.1:8788/delegations"
+}
