@@ -1,0 +1,189 @@
+#!/usr/bin/env bash
+# The game center's local application on Yano X 0.1.0-pre6 or later: three members
+# on a private devnet, set up with the ordinary app-chain commands
+# (yano.sh appchain new, request, seal, join, start) as three operators would.
+#
+#   ./cluster start [--no-anchor]   build the plugin if needed, seal and start the
+#                                   application, anchor it, register the games/ topics
+#   ./cluster status                the application's stage, members and chains
+#   ./cluster topics                the games/ namespace and its game entries
+#   ./cluster stop                  stop the members, keep everything
+#   ./cluster logs <n>              follow member n's log
+#   ./cluster clean                 stop and delete .yano/ (chains, keys, secrets)
+#
+# Then: node serve.mjs --local    and open http://localhost:8787/?proxy=1
+#
+# Everything lives in .yano/; the extracted distribution is never modified. The
+# members run from .yano/release, a private copy of the release whose plugins/
+# holds the release's bundles plus this example's sealed-duels JAR.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd -P)"
+REPO="$(cd "$HERE/.." && pwd -P)"
+STATE="$HERE/.yano"
+RELEASE="$STATE/release"
+APPDIR="$STATE/app"
+GAMES="$STATE/games"
+APP=games
+NODES=3
+HTTP_BASE="${EXAMPLE_HTTP_BASE:-7210}"
+SERVER_BASE="${EXAMPLE_SERVER_BASE:-13510}"
+PLUGIN_JAR="$HERE/plugin/build/libs/sealed-duels-yano-plugin.jar"
+
+die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
+note() { printf '%s\n' "$*"; }
+need() { command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"; }
+
+# The Yano X distribution: $YANO_X_DIST, else the newest yano-x-jvm-* beside this
+# repository's examples that has the app-chain setup commands (0.1.0-pre6 and later).
+resolve_distribution() {
+  local candidate best=""
+  if [ -n "${YANO_X_DIST:-}" ]; then
+    [ -x "$YANO_X_DIST/tools/yano-appchain/bin/yano-appchain" ] \
+      || die "YANO_X_DIST=$YANO_X_DIST is not a Yano X 0.1.0-pre6 (or later) distribution"
+    (cd "$YANO_X_DIST" && pwd -P)
+    return
+  fi
+  for candidate in "$REPO"/yano-x-jvm-*/; do
+    [ -x "$candidate/tools/yano-appchain/bin/yano-appchain" ] || continue
+    best="$candidate"   # glob order: the last match is the newest prerelease of one major
+  done
+  [ -n "$best" ] || die "no Yano X 0.1.0-pre6 (or later) distribution in $REPO; extract one there or set YANO_X_DIST"
+  (cd "$best" && pwd -P)
+}
+
+node_dir() { printf '%s/node%s' "$STATE" "$1"; }
+appchain() { "$RELEASE/yano.sh" appchain "$@"; }
+
+# .yano/release: yano.sh copied (it takes its home from its own directory), every
+# other entry linked back to the distribution, and a real plugins/ directory with
+# the release's bundles plus the sealed-duels JAR. seal pins every bundle's digest,
+# and join refuses a node whose plugins differ, so all members share this one.
+prepare_release() {
+  local dist="$1" entry name jar
+  [ -f "$PLUGIN_JAR" ] || build_plugin "$dist"
+  mkdir -p "$RELEASE/plugins"
+  for entry in "$dist"/*; do
+    name="${entry##*/}"
+    case "$name" in yano.sh|plugins) continue ;; esac
+    [ -e "$RELEASE/$name" ] || [ -L "$RELEASE/$name" ] || ln -s "$entry" "$RELEASE/$name"
+  done
+  cmp -s "$dist/yano.sh" "$RELEASE/yano.sh" || cp "$dist/yano.sh" "$RELEASE/yano.sh"
+  for jar in "$RELEASE"/plugins/*.jar; do
+    [ -e "$jar" ] || continue
+    [ -f "$dist/plugins/${jar##*/}" ] || [ "${jar##*/}" = "${PLUGIN_JAR##*/}" ] || rm -f "$jar"
+  done
+  for jar in "$dist"/plugins/*.jar "$PLUGIN_JAR"; do
+    cmp -s "$jar" "$RELEASE/plugins/${jar##*/}" || cp "$jar" "$RELEASE/plugins/"
+  done
+}
+
+build_plugin() {
+  note "Building the sealed-duels plugin against $(basename "$1")"
+  (cd "$HERE/plugin" && ./gradlew -q build -PyanoJar="$1/yano.jar") || die "the plugin build failed"
+}
+
+# new -> request per member -> seal -> join per member. Each step is skipped once done.
+setup_application() {
+  local i operators="" draft="$APPDIR/$APP.draft.yaml" sealed="$APPDIR/$APP.chain" fingerprint
+  mkdir -p "$APPDIR"
+  chmod 700 "$STATE"
+  if [ ! -f "$sealed" ]; then
+    for ((i = 0; i < NODES; i++)); do operators+="${operators:+,}node$i"; done
+    if [ ! -f "$draft" ]; then
+      appchain new "$APP" --from "$HERE/chain/games.template.yaml" --network devnet --operators "$operators" \
+        --threshold majority --output "$APPDIR" --yes >/dev/null || die "could not write the draft"
+    fi
+    for ((i = 0; i < NODES; i++)); do
+      [ -f "$APPDIR/node$i.member" ] && continue
+      appchain request "$draft" --name "node$i" --host 127.0.0.1 --node-port $((SERVER_BASE + i)) \
+        --http-port $((HTTP_BASE + i)) --node-dir "$(node_dir "$i")" --output "$APPDIR" --yes >/dev/null \
+        || die "node$i could not make its member card"
+    done
+    appchain seal "$draft" --output "$APPDIR" >/dev/null || die "could not seal $draft"
+  fi
+  fingerprint="$(appchain inspect "$sealed" --json | jq -r .displayFingerprint)"
+  for ((i = 0; i < NODES; i++)); do
+    [ -f "$(node_dir "$i")/apps/$APP.chain" ] && continue
+    appchain join "$sealed" --expect-fingerprint "$fingerprint" --node-dir "$(node_dir "$i")" --yes >/dev/null \
+      || die "node$i could not join $APP"
+  done
+  note "  $APP sealed: fingerprint $fingerprint"
+}
+
+start_members() {
+  local i
+  # On a devnet the lead (node0) starts first: its node produces the Cardano devnet.
+  for ((i = 0; i < NODES; i++)); do
+    appchain start --node-dir "$(node_dir "$i")" --timeout 300 | sed 's/^/  /' || die "node$i did not start"
+  done
+  appchain status "$APP" --node-dir "$(node_dir 0)" --wait live --timeout 300 >/dev/null \
+    || die "the application did not go live; ./cluster status"
+}
+
+anchor_chains() {
+  local chain
+  for chain in games-chain authenticated-map-chain duels-chain; do
+    if out="$(appchain anchor "$APP" --chain "$chain" --node-dir "$(node_dir 0)" --yes --timeout 300 2>&1)"; then
+      note "  anchor: $chain in script mode, led by node0"
+    else
+      printf '%s\n' "$out" | tail -3 | sed 's/^/  /'
+      note "  anchor: $chain did not start anchoring — ./cluster logs 0"
+    fi
+  done
+}
+
+case "${1:-}" in
+  start)
+    shift
+    anchoring=1
+    for arg in "$@"; do
+      case "$arg" in
+        --no-anchor) anchoring=0 ;;
+        *) die "unknown option: $arg" ;;
+      esac
+    done
+    need java; need jq; need curl; need node
+    dist="$(resolve_distribution)"
+    note "Anchor Games on $(basename "$dist")"
+    prepare_release "$dist"
+    setup_application
+    start_members
+    [ "$anchoring" = 0 ] || anchor_chains
+    node "$HERE/delegation/setup.mjs" --state "$STATE" --release "$RELEASE" --nodes "$NODES" --http-base "$HTTP_BASE"
+    note ""
+    note "Next: node serve.mjs --local   then open http://localhost:8787/?proxy=1"
+    ;;
+  status)
+    [ -d "$(node_dir 0)" ] || die "not set up yet: ./cluster start"
+    appchain status "$APP" --node-dir "$(node_dir 0)"
+    ;;
+  topics)
+    [ -d "$(node_dir 0)" ] || die "not set up yet: ./cluster start"
+    for topic in games/ games/galaxy/ games/arcade/ games/duels/ games/derby/ games/reef/ games/sonar/ games/neon-rush/; do
+      appchain topics resolve "$topic" --node-dir "$(node_dir 0)" --chain games-chain 2>&1 | head -3
+    done
+    ;;
+  stop)
+    for ((i = NODES - 1; i >= 0; i--)); do
+      [ -d "$(node_dir "$i")" ] && appchain stop --node-dir "$(node_dir "$i")" | sed 's/^/  /'
+    done
+    ;;
+  logs)
+    [ -n "${2:-}" ] || die "usage: ./cluster logs <member number>"
+    exec tail -F "$(node_dir "$2")/logs/node.log"
+    ;;
+  clean)
+    if [ -d "$STATE" ]; then
+      for ((i = NODES - 1; i >= 0; i--)); do
+        [ -d "$(node_dir "$i")" ] && appchain stop --node-dir "$(node_dir "$i")" >/dev/null 2>&1 || true
+      done
+      rm -rf "$STATE"
+    fi
+    note "Removed $STATE"
+    ;;
+  *)
+    sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+    exit 1
+    ;;
+esac

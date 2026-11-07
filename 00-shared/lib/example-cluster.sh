@@ -33,13 +33,14 @@ resolve_distribution() {
     return
   fi
 
+  # These examples use the cluster launcher, which Yano X 0.1.0-pre6 removed.
   for candidate in "$repo"/yano-x-jvm-*; do
-    [ -f "$candidate/yano.jar" ] || continue
+    [ -f "$candidate/yano.jar" ] && [ -f "$candidate/appchain-cluster/cluster.sh" ] || continue
     (cd "$candidate" && pwd -P)
     return
   done
 
-  die "no Yano X JVM distribution found under $repo. Extract one there, or set YANO_X_DIST."
+  die "no Yano X JVM distribution with the cluster launcher (0.1.0-pre2 to pre4) under $repo. Extract one there, or set YANO_X_DIST."
 }
 
 # Build <example>/.yano: a private Yano home whose config/ is the
@@ -117,7 +118,10 @@ example_cluster() {
   [ $# -gt 0 ] || die "usage: ./cluster <start [N]|status|stop|clean|submit|logs|...>"
 
   # The node refuses a symlinked plugin directory; hand it the real path.
-  export YANO_PLUGINS_DIRECTORY="$dist/plugins"
+  # An example that adds its own plugin JAR stages a real directory of its own
+  # (the release's plugins plus its JAR) and names it here, so the extracted
+  # distribution is never modified.
+  export YANO_PLUGINS_DIRECTORY="${EXAMPLE_PLUGINS_DIRECTORY:-$dist/plugins}"
   export YANO_HOME="$home"
 
   local -a args=("$1"); shift

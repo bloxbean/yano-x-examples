@@ -1,0 +1,58 @@
+/* Reef only; shared chrome is in ../shared/base.css. */
+html, body { height: 100%; overflow: hidden; background: #010409; }
+.app { display: flex; flex-direction: column; height: 100vh; }
+.reef-logo { font-weight: 800; letter-spacing: 0.3em; font-size: 15px;
+  background: linear-gradient(90deg, #3ee6ff, #7dff6a, #ff4fd8); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.season { font-size: 12px; color: var(--muted); }
+.season b { color: var(--text); }
+.main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 330px; min-height: 0; }
+.stage { position: relative; min-height: 0; display: grid; grid-template-rows: 1fr auto; }
+.arena { position: relative; min-height: 0; }
+#world { display: block; width: 100%; height: 100%; cursor: crosshair; }
+.side { border-left: 1px solid var(--line); background: rgba(3, 8, 18, 0.88); padding: 12px; display: grid; gap: 10px;
+  align-content: start; overflow: auto; }
+@media (max-width: 900px) {
+  html, body { overflow: auto; }
+  .app { height: auto; }
+  .main { grid-template-columns: 1fr; }
+  .arena { height: 50vh; }
+  .side { border-left: 0; border-top: 1px solid var(--line); }
+}
+.travel { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); padding: 6px 14px; border-radius: 999px;
+  background: rgba(40, 20, 80, 0.85); border: 1px solid rgba(167, 139, 255, 0.6); color: #d8ccff; font-size: 12px;
+  letter-spacing: 0.08em; pointer-events: none; }
+.catchup { position: absolute; left: 14px; bottom: 12px; font-size: 12px; color: var(--muted); font-family: var(--mono); }
+.opening { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(420px, calc(100% - 32px));
+  background: rgba(4, 14, 30, 0.9); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; text-align: center; }
+.opening h2 { margin: 0 0 6px; }
+
+.dock { border-top: 1px solid var(--line); background: rgba(3, 10, 22, 0.92); padding: 10px 14px 12px; display: grid; gap: 10px; }
+.palette { display: flex; gap: 8px; flex-wrap: wrap; }
+.pat { border: 1px solid var(--line); border-radius: 12px; background: rgba(10, 24, 44, 0.9); color: var(--text); font: inherit;
+  padding: 6px 8px; display: grid; grid-template-columns: 44px auto; gap: 2px 8px; align-items: center; cursor: pointer; text-align: left;
+  transition: border-color 0.15s, box-shadow 0.15s; }
+.pat canvas { grid-row: span 2; width: 44px; height: 30px; }
+.pat .name { font-weight: 700; font-size: 12px; }
+.pat .cost { font-size: 11px; color: var(--gold); font-family: var(--mono); }
+.pat.on { border-color: var(--me); box-shadow: 0 0 16px rgba(62, 230, 255, 0.35); }
+.pat.off { opacity: 0.45; }
+.tools { display: flex; gap: 14px; align-items: center; }
+.spores { display: flex; gap: 8px; align-items: center; }
+.meter { display: flex; gap: 3px; }
+.meter i { width: 10px; height: 14px; border-radius: 3px; background: rgba(120, 140, 200, 0.15); }
+.meter i.full { background: var(--good); box-shadow: 0 0 8px rgba(109, 255, 168, 0.6); }
+.timebar { display: flex; gap: 8px; align-items: center; }
+.timebar input { flex: 1; accent-color: #a78bff; }
+.timebar .btn { padding: 6px 10px; }
+.live.on { color: var(--bad); border-color: rgba(255, 107, 138, 0.5); }
+.species { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.species li { display: flex; gap: 8px; align-items: center; }
+.species .sw { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.species .pop { margin-left: auto; font-family: var(--mono); color: var(--muted); }
+.species li.me { font-weight: 700; }
+.chart { width: 100%; height: 90px; display: block; border-radius: 8px; }
+.placements { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 12px; max-height: 220px; overflow: auto; }
+.placements li { display: flex; gap: 8px; align-items: center; }
+.placements .sw { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+.placements .g { margin-left: auto; font-family: var(--mono); color: var(--muted); }
+.howto { margin: 0; padding-left: 18px; display: grid; gap: 6px; }

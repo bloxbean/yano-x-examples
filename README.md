@@ -21,6 +21,8 @@ show that an app chain is ordinary infrastructure you talk to over HTTP.
 | [04](04-catalyst-disbursement-java/) | Catalyst milestone disbursement | Java | The approved hash **is** the Cardano transaction id — approve off-chain, then pay exactly what was approved |
 | [07](07-webhook-effects-js/) | Webhook effects | JavaScript | A finalized approval calls an ERP — and the outcome goes **back into consensus** |
 | [09](09-anchor-verify-java/) | Anchor and verify | Java | A verifier that reads **Cardano and nothing else** — no Yano node is asked anything |
+| [20](20-anchor-canvas-game/) | Anchor Canvas (game) | HTML/JS | A shared pixel wall: CIP-30 wallet sessions, a deterministic fold over an ordered log, pixels proven against the Cardano anchor — static, GitHub Pages-ready |
+| [21](21-anchor-game-center/) | Anchor Games (game center) | HTML/JS, Java plugin | One password account and eight browser games on one ordered-log chain whose topic registry protects `games/`: every move is signed by the player's own one-hour **session key**, delegated by the publisher's service, and the members refuse anything else. Anchor Galaxy, Anchor Arcade, Land Rush, Comet Derby, Reef, Deep Sonar, Neon Rush and Sealed Duels, also as a plugin edition whose rules run on the members. Needs Yano X 0.1.0-pre6 |
 
 The full catalog of planned examples, grouped from foundations through Cardano
 anchoring to custom plugins, is in **[USE_CASES.md](USE_CASES.md)**.
@@ -36,6 +38,11 @@ You need:
 - An extracted **Yano X JVM distribution** in this directory
   (`yano-x-jvm-<version>/`), downloaded from the
   [releases page](https://github.com/bloxbean/yano-x/releases)
+
+Examples 01–20 run on the `yano-x-jvm-0.1.0-pre2` cluster launcher. Example
+21 needs **0.1.0-pre6** or later, which replaced that launcher with the
+`yano.sh appchain` setup commands and added topic policies; extract it beside
+the other one. Each `./cluster` script picks the distribution it needs.
 
 If the distribution lives somewhere else, point at it:
 
@@ -80,6 +87,8 @@ pom.xml              aggregator — lets an IDE see every Java example at once
 04-catalyst-disbursement-java/
 07-webhook-effects-js/
 09-anchor-verify-java/
+20-anchor-canvas-game/
+21-anchor-game-center/
 yano-x-jvm-*/        the extracted distribution (not committed)
 ```
 

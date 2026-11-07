@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "plugin-bundle.sealed-duels",
+  "version": "1.0.0",
+  "yanoApi": { "min": 3, "max": 3, "minLevel": 4 },
+  "dependencies": [],
+  "contributions": [
+    { "kind": "app-state-machine", "name": "sealed-duels", "provider": "org.yanox.examples.duels.SealedDuelsStateMachineProvider" }
+  ]
+}
