@@ -32,8 +32,11 @@ public final class Chain {
     private static final String PLUGIN = "org.yanoproject.x.role-workflow";
     private static final int BASE_PORT = Integer.getInteger("yano.httpBase",
             Integer.parseInt(System.getenv().getOrDefault("YANO_HTTP_BASE", "7130")));
-    private static final String API_KEY =
-            System.getenv().getOrDefault("YANO_CLUSTER_API_KEY", "yano-local-cluster-full-key");
+    /**
+     * Only needed when the members enable API-key auth; a node set up with
+     * {@code appchain join} keeps its key in {@code secrets/api.key}.
+     */
+    private static final String API_KEY = System.getenv("YANO_API_KEY");
 
     private final int memberCount;
     private final HttpClient http = HttpClient.newBuilder()
@@ -52,6 +55,10 @@ public final class Chain {
                 .chainId(CHAIN_ID)
                 .apiKey(API_KEY)
                 .build();
+    }
+
+    private static HttpRequest.Builder authorized(HttpRequest.Builder request) {
+        return API_KEY == null ? request : request.header("X-API-Key", API_KEY);
     }
 
     private String baseUrl(int index) {
@@ -100,9 +107,9 @@ public final class Chain {
     public com.fasterxml.jackson.databind.JsonNode finalizedAt(String messageId) {
         try {
             HttpResponse<String> response = http.send(
-                    HttpRequest.newBuilder(URI.create(baseUrl(0) + "/api/v1/app-chain/chains/"
-                                    + CHAIN_ID + "/messages/" + messageId))
-                            .header("X-API-Key", API_KEY).GET().build(),
+                    authorized(HttpRequest.newBuilder(URI.create(baseUrl(0) + "/api/v1/app-chain/chains/"
+                                    + CHAIN_ID + "/messages/" + messageId)))
+                            .GET().build(),
                     HttpResponse.BodyHandlers.ofString());
             return response.statusCode() == 200
                     ? new com.fasterxml.jackson.databind.ObjectMapper().readTree(response.body())
@@ -127,8 +134,7 @@ public final class Chain {
                 + (path.contains("?") ? "&" : "?") + "chain=" + CHAIN_ID;
         try {
             HttpResponse<String> response = http.send(
-                    HttpRequest.newBuilder(URI.create(url))
-                            .header("X-API-Key", API_KEY)
+                    authorized(HttpRequest.newBuilder(URI.create(url)))
                             .header("Accept", "application/json")
                             .GET().build(),
                     HttpResponse.BodyHandlers.ofString());
@@ -145,7 +151,7 @@ public final class Chain {
                 Thread.currentThread().interrupt();
             }
             throw new IllegalStateException("cannot reach the chain — is it running? "
-                    + "(./cluster start 3 --anchor-mode metadata)", failure);
+                    + "(./cluster start 3)", failure);
         }
     }
 

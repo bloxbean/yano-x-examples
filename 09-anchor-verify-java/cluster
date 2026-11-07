@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # Start, inspect and stop the evidence chain for this example.
-#   ./cluster start 3   three members, anchoring bootstrapped automatically
+#
+#   ./cluster start 3     three members on a private devnet (HTTP 7150..7152),
+#                         the chain anchored to Cardano in script mode
+#   ./cluster status      per-node tip, state root and cross-node consistency
+#   ./cluster logs 0 -f   tail a node log
+#   ./cluster stop        stop the nodes, keep the data
+#   ./cluster clean       stop and wipe .yano/
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
 export EXAMPLE_HTTP_BASE="${EXAMPLE_HTTP_BASE:-7150}"

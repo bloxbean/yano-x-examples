@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Start, inspect and stop the three-member access-log chain for this example.
+# It seals chain/access-log.template.yaml with the release's own setup commands
+# (see ../00-shared/README.md).
 #
-#   ./cluster start 3     three nodes on a private devnet (HTTP 7100..7102)
-#   ./cluster status      per-node tip, state root and cross-node consistency
-#   ./cluster logs 0 -f   tail a node log
-#   ./cluster stop        stop the nodes, keep the data
-#   ./cluster clean       stop and wipe .yano/data
+#   ./cluster start 3     three members on a private devnet (HTTP 7100..7102)
+#   ./cluster status      the application's stage, every member's tip and root
+#   ./cluster logs 0 -f   tail a member's log
+#   ./cluster stop [n]    stop the members (or just member n), keep the data
+#   ./cluster clean       stop and wipe .yano/ (chain, member keys, devnet)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd -P)"

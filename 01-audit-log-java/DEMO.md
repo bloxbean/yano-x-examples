@@ -3,7 +3,7 @@
 **Run time:** about 3 minutes · **Audience:** anyone · **Language:** Java
 
 ```bash
-./cluster start 3     # once, takes ~40s
+./cluster start 3     # once, takes a minute or two
 ./demo.sh             # the walkthrough
 ```
 
@@ -170,10 +170,10 @@ java -jar target/audit-log.jar tips
 node being down:
 
 ```bash
-kill "$(cat .yano/data/node2.pid)"        # node 2 goes away
+./cluster stop 2                          # node 2 goes away
 java -jar target/audit-log.jar record grant --subject frank --resource vpn --by alice
 java -jar target/audit-log.jar tips       # node 2 unreachable, 0 and 1 still agree
-./cluster stop && ./cluster start 3       # bring it back; it catches up
+./cluster start 3                         # bring it back; it catches up
 ```
 
 **Restart and check nothing moved.** State survives a restart:
@@ -194,5 +194,5 @@ java -jar target/audit-log.jar list       # same entries, same message ids
 
 ```bash
 ./cluster stop     # stop the nodes, keep the data
-./cluster clean    # stop and wipe .yano/data
+./cluster clean    # stop and wipe .yano/ (chain, member keys, devnet)
 ```

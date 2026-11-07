@@ -1,0 +1,24 @@
+# Example 02 as an app-chain template: a consortium service registry.
+#
+# ./cluster start turns it into a draft with
+#   yano.sh appchain new service-registry --from chain/service-registry.template.yaml
+# then runs the ordinary setup commands (request, seal, join, start) for three
+# local members on a private devnet. seal fixes the operators, threshold, member
+# keys, plugin digests and the chain's genesis identity; nothing here is per node.
+membership: static     # the member set is fixed at seal; `governed` lets members vote changes in
+sequencing: fixed      # the lead (node0) proposes every block
+chains:
+  # One chain, one job: the registry, on the release's owned-registry recipe
+  # (the stock kv-registry state machine: the first writer owns a key).
+  - id: service-registry-chain
+    recipe: owned-registry
+    settings:
+      # A block every second keeps the demo responsive. Finality still needs a
+      # round trip to a threshold of members; it is not instant.
+      block.interval-ms: "1000"
+      # Values must be valid UTF-8. The alternatives are `raw` (any non-empty
+      # bytes, the recipe's default) and `cbor` (one well-formed CBOR item).
+      # It is sealed into the chain's identity, so every member agrees on it.
+      machines.kv-registry.value-format: "utf8"
+    # ./cluster start anchors it to Cardano in script mode (--no-anchor skips it).
+    anchor: {mode: script, every-blocks: 10}

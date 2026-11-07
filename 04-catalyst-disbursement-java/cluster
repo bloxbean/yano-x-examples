@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Start, inspect and stop the disbursement chain for this example.
 #
-#   ./cluster start 3 --anchor-mode metadata   three members + Cardano anchoring
-#   ./cluster status | stop | clean
+#   ./cluster start 3     three members on a private devnet, anchored to it (HTTP 7140..7142)
+#   ./cluster status      per-member tip and state root
+#   ./cluster logs 0 -f   tail a member's log
+#   ./cluster stop [n]    stop the members (or just member n), keep the data
+#   ./cluster clean       stop and wipe .yano/
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
 export EXAMPLE_HTTP_BASE="${EXAMPLE_HTTP_BASE:-7140}"

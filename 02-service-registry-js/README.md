@@ -10,20 +10,20 @@ before wiring money to it.
 |---|---|
 | Capability | `state:kv-registry`, `sequencer:fixed`, static membership |
 | Members | 3 nodes, threshold 2 |
-| Needs | Node.js 20+, Java 25 (to run the chain), `curl`, `jq`, `python3` |
+| Needs | Node.js 20+, Java 25 (to run the chain), `curl`, `jq`, Yano X 0.1.0-pre6 |
 | Dependencies | **none** — no npm install |
 | Network | Local devnet — no funds, no external Cardano node |
 
 ## Run it
 
 ```bash
-./cluster start 3     # three members on a private devnet (~40s first time)
+./cluster start 3     # three members on a private devnet (a minute or two the first time)
 ./demo.sh             # the guided walkthrough
 ```
 
 ```bash
 ./cluster stop        # stop the members, keep the data
-./cluster clean       # stop and wipe .yano/
+./cluster clean       # stop and wipe .yano/ (chain, member keys, devnet)
 ```
 
 ## Use it directly
@@ -156,23 +156,23 @@ signatures in the captured envelope verify over exactly those bytes.
 ## Files
 
 ```
-chain/application-appchain.yml   the chain definition (commented)
-trust.json                       the member keys this app pins — read this first
-cluster                          start / stop / status
-demo.sh                          the guided walkthrough
+chain/service-registry.template.yaml  the application as an app-chain template (commented)
+trust.json                            the member keys this app pins — read this first
+cluster                               start / stop / status: seals and runs the template
+demo.sh                               the guided walkthrough
 src/
-  cli.js                         the command line
-  client.js                      REST calls — plain fetch()
-  registry.js                    kv-registry command encoding and state decoding
-  verify.js                      block hash, commit digest, Ed25519 certificate check
-  cbor.js                        canonical CBOR, just what is needed
-  blake2b.js                     BLAKE2b-256 — Node ships blake2b512, not this
+  cli.js                              the command line
+  client.js                           REST calls — plain fetch()
+  registry.js                         kv-registry command encoding and state decoding
+  verify.js                           block hash, commit digest, Ed25519 certificate check
+  cbor.js                             canonical CBOR, just what is needed
+  blake2b.js                          BLAKE2b-256 — Node ships blake2b512, not this
 test/
-  run.js                         npm test — everything that needs no chain
-  selftest.js                    primitives checked against known vectors
-  verifier.test.js               22 tampered envelopes that must be rejected
-  live.test.js                   npm run test:live — against a running chain
-  fixtures/state-proof.json      a real envelope captured from a chain
+  run.js                              npm test — everything that needs no chain
+  selftest.js                         primitives checked against known vectors
+  verifier.test.js                    22 tampered envelopes that must be rejected
+  live.test.js                        npm run test:live — against a running chain
+  fixtures/state-proof.json           a real envelope captured from a chain
 ```
 
 ## Notes worth knowing

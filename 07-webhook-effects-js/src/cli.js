@@ -147,8 +147,13 @@ async function listEffects() {
     return;
   }
   for (const record of list) {
+    // The list holds what was emitted; each outcome is committed separately,
+    // under the order it belongs to (scope approvals/on-approved/<orderId>).
+    const orderId = record.scope?.split('/').pop();
+    const outcome = record.status ?? record.state
+      ?? (orderId ? (await effectState(orderId))?.state : undefined) ?? '';
     console.log(`  height ${record.height ?? '?'}  ordinal ${record.ordinal ?? '?'}  ` +
-      `${record.type ?? record.effectType ?? '?'}  ${record.status ?? record.state ?? ''}`);
+      `${record.type ?? record.effectType ?? '?'}  ${orderId ?? ''}  ${outcome}`);
   }
   const stats = (await status()).effects?.executor;
   if (stats) {

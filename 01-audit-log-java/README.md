@@ -10,13 +10,13 @@ and any entry can be proved to an outsider on its own.
 |---|---|
 | Capability | `state:ordered-log`, `sequencer:fixed`, static membership |
 | Members | 3 nodes, threshold 2 |
-| Needs | Java 25, Maven, `curl`, `jq`, `python3` |
+| Needs | Java 25, Maven, `curl`, `jq`, Yano X 0.1.0-pre6 |
 | Network | Local devnet — no funds, no external Cardano node |
 
 ## Run it
 
 ```bash
-./cluster start 3     # three members on a private devnet (~40s first time)
+./cluster start 3     # three members on a private devnet (a minute or two the first time)
 mvn -B package        # build the client app
 ./demo.sh             # the guided walkthrough
 ```
@@ -117,8 +117,8 @@ the application itself uses is exercised by `./demo.sh`.
 ## Files
 
 ```
-chain/application-appchain.yml    the chain definition (commented)
-cluster                           start / stop / status wrapper
+chain/access-log.template.yaml    the application as an app-chain template (commented)
+cluster                           start / stop / status: seals and runs the template
 demo.sh                           the guided walkthrough
 pom.xml                           one real dependency: org.yanoproject.x:yano-x-client
 src/main/java/.../

@@ -81,8 +81,6 @@ public final class AnchorVerifyApp {
     private AppChainClient client() {
         return AppChainClient.builder("http://127.0.0.1:" + BASE_PORT + "/api/v1")
                 .chainId(CHAIN_ID)
-                .apiKey(System.getenv().getOrDefault("YANO_CLUSTER_API_KEY",
-                        "yano-local-cluster-full-key"))
                 .build();
     }
 
@@ -131,10 +129,11 @@ public final class AnchorVerifyApp {
         }
         System.out.printf("  mode             %s%n", anchor.path("mode").asText());
         System.out.printf("  bootstrapped     %s%n", anchor.path("bootstrapped").asBoolean());
-        System.out.printf("  anchored         %d time(s)%n", anchor.path("anchoredCount").asLong());
+        System.out.printf("  anchored         %d time(s) since this node started%n",
+                anchor.path("anchoredCount").asLong());
         System.out.printf("  last height      %d%n", anchor.path("lastAnchoredHeight").asLong());
         System.out.printf("  script address   %s%n", anchor.path("scriptAddress").asText(""));
-        if (anchor.path("anchoredCount").asLong() == 0) {
+        if (anchor.path("lastAnchoredHeight").asLong() == 0) {
             System.out.println("\n  Nothing anchored yet. Record something and wait a few seconds.");
         }
     }
@@ -186,8 +185,9 @@ public final class AnchorVerifyApp {
 
         // The proof must be taken AT the anchored height. A proof at the tip
         // commits to a root Cardano has not seen yet, and would be rejected.
-        AppChainClient.Proof proof = client.proof(key, anchoredHeight).orElseThrow(
-                () -> new IllegalStateException("no proof for that record at height "
+        AppChainClient.Proof proof = client.proof(key, anchoredHeight)
+                .filter(found -> found.valueHex() != null)      // an exclusion proof proves nothing here
+                .orElseThrow(() -> new IllegalStateException("no proof for that record at height "
                         + anchoredHeight + " — was it recorded before the last anchor?"));
 
         Bundle bundle = Bundle.from(proof, options.orDefault("note", "evidence record"));
