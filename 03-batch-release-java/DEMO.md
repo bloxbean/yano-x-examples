@@ -3,7 +3,7 @@
 **Run time:** about 1 minute · **Audience:** anyone · **Language:** Java
 
 ```bash
-./cluster start 3
+./cluster start 3     # once, takes a minute or two
 mvn -B package
 ./demo.sh
 ```

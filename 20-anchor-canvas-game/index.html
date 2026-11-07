@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Anchor Canvas</title>
+  <meta name="description" content="A shared pixel wall on a Yano X app ledger, finalized by 4 of 5 members and anchored to Cardano.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 4'%3E%3Crect width='2' height='2' fill='%23ff4d6d'/%3E%3Crect x='2' width='2' height='2' fill='%23ffd60a'/%3E%3Crect y='2' width='2' height='2' fill='%234cc9f0'/%3E%3Crect x='2' y='2' width='2' height='2' fill='%2380ed99'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <div>
+        <h1>Anchor Canvas</h1>
+        <p class="tagline">One pixel wall, ordered by a Yano X app ledger and sealed on Cardano.</p>
+      </div>
+    </div>
+    <div class="chain-pill" id="chain-pill">connecting…</div>
+  </header>
+
+  <div class="banner" id="banner" hidden></div>
+
+  <main class="layout">
+    <section class="board">
+      <div class="toolbar">
+        <div class="modes" role="radiogroup" aria-label="Tool">
+          <button type="button" class="mode active" data-mode="paint" role="radio" aria-checked="true">Paint</button>
+          <button type="button" class="mode" data-mode="inspect" role="radio" aria-checked="false">Inspect</button>
+        </div>
+        <span class="coords" id="coords">&nbsp;</span>
+        <div class="cooldown" id="cooldown" title="Cooldown"><span></span></div>
+      </div>
+      <div class="wall-frame">
+        <canvas id="wall" width="512" height="512" aria-label="Pixel wall"></canvas>
+        <div class="loading" id="loading">Replaying the ledger…</div>
+      </div>
+      <div class="palette" id="palette" role="radiogroup" aria-label="Colour"></div>
+      <p class="hint" id="hint">Join to paint. Every pixel is a message on <code>orders-chain</code>.</p>
+    </section>
+
+    <aside class="side">
+      <section class="card" id="player-card">
+        <h2>Player</h2>
+        <div id="join-view">
+          <label class="field">
+            <span>Name</span>
+            <input id="name" maxlength="16" placeholder="painter" autocomplete="nickname">
+          </label>
+          <div class="wallets" id="wallets"></div>
+          <button type="button" class="ghost" id="guest">Play as guest</button>
+          <p class="small muted">A wallet signs once (CIP-30 <code>signData</code>) to authorize a session key.
+            Nothing is spent. Wallet players paint every 3&nbsp;s, guests every 8&nbsp;s.</p>
+        </div>
+        <div id="me-view" hidden>
+          <div class="me">
+            <span class="swatch big" id="me-swatch"></span>
+            <div>
+              <strong id="me-name"></strong>
+              <div class="small muted" id="me-id"></div>
+            </div>
+          </div>
+          <div class="small" id="me-status"></div>
+          <label class="field">
+            <span>Relay through</span>
+            <select id="relay"></select>
+          </label>
+          <button type="button" class="ghost small-btn" id="leave">Leave</button>
+        </div>
+      </section>
+
+      <section class="card" id="anchor-card">
+        <h2>Cardano anchor</h2>
+        <div class="anchor-grid">
+          <canvas id="frame" width="128" height="128" aria-label="Wall at the last anchor"></canvas>
+          <div class="anchor-facts" id="anchor-facts"><span class="muted small">Waiting for the first anchor…</span></div>
+        </div>
+        <div class="meter"><span id="anchor-meter"></span></div>
+        <p class="small muted" id="anchor-next"></p>
+      </section>
+
+      <section class="card">
+        <h2>Holding the wall</h2>
+        <ol class="leaders" id="leaders"></ol>
+      </section>
+
+      <section class="card">
+        <h2>Ledger feed</h2>
+        <ul class="feed" id="feed"></ul>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="foot small muted">
+    Static HTML and JavaScript — no backend. Rules are a deterministic fold over the finalized log;
+    every browser computes the same wall. <a href="https://yano-x.io" target="_blank" rel="noopener">Yano X</a>
+  </footer>
+
+  <dialog id="inspect">
+    <form method="dialog" class="dialog-head">
+      <h2 id="inspect-title">Pixel</h2>
+      <button class="ghost close" aria-label="Close">✕</button>
+    </form>
+    <div id="inspect-body"></div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

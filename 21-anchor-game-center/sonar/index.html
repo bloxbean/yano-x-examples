@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Deep Sonar</title>
+  <meta name="description" content="Battleship with hidden fleets and no referee: each fleet is a Merkle root, and every hit or miss is proven against it on a Yano X app ledger.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Ccircle cx='5' cy='5' r='4' fill='none' stroke='%2366ffb4'/%3E%3Cpath d='M5 5L9 3' stroke='%2366ffb4'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="../shared/base.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <a class="back" id="back" href="../">← Game center</a>
+    <div class="sonar-logo">DEEP SONAR</div>
+    <div class="vs" id="vs">Lobby</div>
+    <div class="chips">
+      <span class="chip">block <b id="blk">—</b></span>
+      <span class="chip">finality <b id="fin">—</b></span>
+      <span class="chip">sealed on Cardano <b id="sealed">—</b></span>
+    </div>
+  </header>
+  <div class="banner" id="banner" hidden></div>
+  <div class="main">
+    <div class="stage">
+      <canvas id="sea" aria-label="Your waters and the enemy's"></canvas>
+      <div class="status" id="status"><div class="what" id="what"></div><div class="sub" id="sub"></div></div>
+      <div class="lobby-panel" id="lobby">
+        <h2>Fleet lobby</h2>
+        <p class="small">Your fleet is on the left. Its Merkle root is all the ledger will see — the positions stay in this browser until the battle ends.</p>
+        <div class="post">
+          <button class="btn" id="shuffle">⟳ Shuffle fleet</button>
+          <button class="btn primary" id="challenge">Post a challenge</button>
+        </div>
+        <div class="small mono" id="root"></div>
+        <h3>Open challenges</h3>
+        <ul class="list" id="open"></ul>
+        <h3>Battles this hour</h3>
+        <ul class="list" id="live"></ul>
+      </div>
+    </div>
+    <aside class="side">
+      <div class="card">
+        <h3>Commander</h3>
+        <div id="me-empty" class="small">Not signed in. <button class="link" id="open-auth">Sign in or create one</button></div>
+        <div id="me" hidden>
+          <div class="me">
+            <div class="avatar" id="avatar">?</div>
+            <div>
+              <div><b id="me-name"></b> <span class="badge good">profile on ledger</span></div>
+              <div class="small mono" id="me-key"></div>
+            </div>
+          </div>
+          <div class="me-row">
+            <label class="small">Relay through <select id="relay"></select></label>
+            <button class="link" id="signout">Sign out</button>
+          </div>
+        </div>
+      </div>
+      <div class="card" id="battle-card" hidden>
+        <h3>This battle</h3>
+        <div id="fleets"></div>
+        <div class="row"><button class="btn" id="prove-battle" hidden>Prove the result</button><a class="btn" id="to-lobby" href="#">Lobby</a></div>
+      </div>
+      <div class="card" id="merkle-card" hidden>
+        <h3>Last answer, checked</h3>
+        <ol class="merkle" id="merkle"></ol>
+      </div>
+      <div class="card" id="log-card" hidden>
+        <h3>Shots on the ledger</h3>
+        <ul class="log" id="log"></ul>
+      </div>
+      <div class="card">
+        <h3>No referee needed</h3>
+        <ol class="howto small">
+          <li><b>Commit.</b> Your fleet becomes one Merkle root of 100 salted cells. The ledger stores the root, never the positions.</li>
+          <li><b>Answer with a proof.</b> Every hit or miss comes with the cell’s salt and 7-hash path; every browser climbs it to the committed root. A lie does not hash.</li>
+          <li><b>Reveal.</b> At the end both fleets are revealed and checked against their roots and the rules.</li>
+          <li><b>Block-time deadlines.</b> 40 s to fire, 20 s to answer — a missed deadline loses, the same in every browser.</li>
+        </ol>
+      </div>
+    </aside>
+  </div>
+</div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

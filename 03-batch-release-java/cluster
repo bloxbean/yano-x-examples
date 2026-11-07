@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
-# Start, inspect and stop the batch-release chain for this example.
+# Start, inspect and stop the three-member batch-release chain for this example.
 #
-#   ./cluster start 3 --anchor-mode metadata   three members + Cardano anchoring
-#   ./cluster status                           tips, roots, anchor state
-#   ./cluster stop | clean
+#   ./cluster start 3     three nodes on a private devnet (HTTP 7130..7132),
+#                         anchored to its Cardano L1 in script mode
+#   ./cluster status      per-node tip, state root and cross-node consistency
+#   ./cluster logs 0 -f   tail a node log
+#   ./cluster stop        stop the nodes, keep the data
+#   ./cluster clean       stop and wipe .yano/
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
 
+# Distinct ports per example so several can run side by side.
 export EXAMPLE_HTTP_BASE="${EXAMPLE_HTTP_BASE:-7130}"
 export EXAMPLE_SERVER_BASE="${EXAMPLE_SERVER_BASE:-13430}"
 

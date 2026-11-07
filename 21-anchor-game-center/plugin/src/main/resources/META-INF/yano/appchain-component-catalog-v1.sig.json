@@ -1,0 +1,11 @@
+{
+  "schemaVersion" : 1,
+  "algorithm" : "Ed25519",
+  "keyId" : "examples-duels-2026",
+  "bundleId" : "plugin-bundle.sealed-duels",
+  "bundleVersion" : "1.0.0",
+  "catalogSha256" : "482e0143594f3f37f1990319a5b0f1dc0fa1b769991a00e3f875a9c936262c5f",
+  "runtimeManifestSha256" : "ec48abb08d6f8b9f15b3df103a329735d141d17e385f28b6bab74138f57cb2fc",
+  "configurationMetadataSha256" : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "signature" : "x7M/9bcICVv0GPsLvQ3H5RlG+XyqMxMrp/BPd/TBhJN3ogUFH2DXA8WFshgtgQGxKyLO65x2NWijCS+Y3X0mBw=="
+}

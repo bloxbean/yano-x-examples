@@ -21,6 +21,8 @@ show that an app chain is ordinary infrastructure you talk to over HTTP.
 | [04](04-catalyst-disbursement-java/) | Catalyst milestone disbursement | Java | The approved hash **is** the Cardano transaction id — approve off-chain, then pay exactly what was approved |
 | [07](07-webhook-effects-js/) | Webhook effects | JavaScript | A finalized approval calls an ERP — and the outcome goes **back into consensus** |
 | [09](09-anchor-verify-java/) | Anchor and verify | Java | A verifier that reads **Cardano and nothing else** — no Yano node is asked anything |
+| [20](20-anchor-canvas-game/) | Anchor Canvas (game) | HTML/JS | A shared pixel wall: CIP-30 wallet sessions, a deterministic fold over an ordered log, pixels proven against the Cardano anchor — static, GitHub Pages-ready |
+| [21](21-anchor-game-center/) | Anchor Games (game center) | HTML/JS, Java plugin | One password account and eight browser games on one ordered-log chain whose topic registry protects `games/`: every move is signed by the player's own one-hour **session key**, delegated by the publisher's service, and the members refuse anything else. Anchor Galaxy, Anchor Arcade, Land Rush, Comet Derby, Reef, Deep Sonar, Neon Rush and Sealed Duels, also as a plugin edition whose rules run on the members. |
 
 The full catalog of planned examples, grouped from foundations through Cardano
 anchoring to custom plugins, is in **[USE_CASES.md](USE_CASES.md)**.
@@ -32,15 +34,15 @@ You need:
 - **Java 25** — `java -version`
 - **Maven** — for the Java examples
 - **Node.js 20+** — for the JavaScript examples
-- `bash`, `curl`, `jq`, `python3` — standard on macOS and Linux
-- An extracted **Yano X JVM distribution** in this directory
-  (`yano-x-jvm-<version>/`), downloaded from the
+- `bash`, `curl`, `jq` — standard on macOS and Linux
+- An extracted **Yano X JVM distribution, 0.1.0-pre6 or later**, in this
+  directory (`yano-x-jvm-0.1.0-pre6/`), downloaded from the
   [releases page](https://github.com/bloxbean/yano-x/releases)
 
 If the distribution lives somewhere else, point at it:
 
 ```bash
-export YANO_X_DIST=/path/to/yano-x-jvm-0.1.0-pre2
+export YANO_X_DIST=/path/to/yano-x-jvm-0.1.0-pre6
 ```
 
 ## Running an example
@@ -54,14 +56,18 @@ cd 01-audit-log-java
 ./cluster clean       # stop and wipe when you're done
 ```
 
-`./cluster` also takes `status`, `stop`, `logs <node>` and anything else the
-bundled launcher accepts.
+`./cluster` also takes `status`, `stop [n]`, `logs <n> [-f]` and `clean`.
+
+`./cluster start` sets the example's application up the way real operators
+would, with the release's own setup commands: `yano.sh appchain new` from the
+example's template, then `request`, `seal`, `join` and `start` for each of three
+members on a private Cardano devnet that the lead member produces. See
+[00-shared](00-shared/) for the steps.
 
 **Anchoring is on by default.** Every example anchors its state root to the
 local Cardano devnet in script mode — a Plutus V3 thread NFT per chain, with a
-validator-enforced datum chain. The launcher funds the anchor wallet from the
-faucet and bootstraps each chain on first start, so there is nothing to set up.
-Opt out with `./cluster start 3 --no-anchor`.
+validator-enforced datum chain, started with `yano.sh appchain anchor`. There
+is nothing to set up. Opt out with `./cluster start 3 --no-anchor`.
 
 Each example gets its own chain, its own data directory and its own ports, so
 you can leave one running while you try another. Nothing is written back to the
@@ -80,6 +86,8 @@ pom.xml              aggregator — lets an IDE see every Java example at once
 04-catalyst-disbursement-java/
 07-webhook-effects-js/
 09-anchor-verify-java/
+20-anchor-canvas-game/
+21-anchor-game-center/
 yano-x-jvm-*/        the extracted distribution (not committed)
 ```
 
@@ -90,7 +98,7 @@ README.md                        what it is and how it works
 DEMO.md                          the demo script — read this first
 cluster                          start / stop / status
 demo.sh                          guided walkthrough
-chain/application-appchain.yml   the chain definition
+chain/<app>.template.yaml        the application: its chains, recipes and settings
 src/ or index.js                 the application
 ```
 
@@ -136,31 +144,37 @@ That gives you four things a normal database cannot:
 And it stays honest about what it is not: membership is a configured list of
 keys, not an open validator set. These examples say so where it matters.
 
-## Reference — the `state:` block in a chain config
+## Reference — a chain's state identity
 
-Every chain config in this repo carries three fields that look alike but behave
-completely differently. They must be configured together, and the runtime
-refuses to start if they disagree.
+Every sealed chain carries three state fields that look alike but behave
+completely differently. You no longer write them: `yano.sh appchain seal` puts
+them into `<app>.chain`, and refuses a template that tries to set them.
 
 ```yaml
-state:
-  commitment-profile: mpf-blake2b256-v1
-  format-fingerprint: 91ee14091200f1e24659112d640e877e9177779dcc81dd06117f013e9190082b
-  genesis-id: e208e2576c58bc217342a51191ad5b1568afd316fcd90971dab4b350b6d26ebb
+state.commitment-profile: mpf-blake2b256-v1
+state.format-fingerprint: 91ee14091200f1e24659112d640e877e9177779dcc81dd06117f013e9190082b
+state.genesis-id: 4e63218fc2d753d6a9b32073484942d88d54dff21837bc24ddcd0efd5484c899
 ```
 
 | Field | Same on every member? | Across different chains | Where it comes from |
 |---|---|---|---|
-| `commitment-profile` | must be identical | same, if they use the same profile | you pick one of three |
+| `commitment-profile` | must be identical | same, if they use the same profile | the chain's recipe |
 | `format-fingerprint` | must be identical | same, if they use the same profile | **derived** — a constant of the profile |
-| `genesis-id` | must be identical | **must differ** | **chosen** — fresh random bytes per chain |
+| `genesis-id` | must be identical | **must differ** | **derived by seal** from the draft's invite, the chain id and its settings |
+
+To see them for an example, after `./cluster start`:
+
+```bash
+jq '.genesis.chains[] | {id, state: (.settings | with_entries(select(.key|startswith("state."))))}' \
+  .yano/app/*.chain
+```
 
 ### The three commitment profiles
 
 This is a closed catalog — `StateCommitmentProfiles` in `yano-core-api` defines
 exactly three, and only two can be run today. The fingerprint is
 `blake2b256("yano-state-commitment-format-v1\0" || canonical profile descriptor)`,
-so it is fixed per profile. Copy it as-is:
+so it is fixed per profile:
 
 | `commitment-profile` | `format-fingerprint` | Verification |
 |---|---|---|
@@ -168,8 +182,8 @@ so it is fixed per profile. Copy it as-is:
 | `jmt-blake2b256-v1` | `10c06baa78234478a3ea94d2c61e23cea8b145c9416ece35688da9be8106e97a` | off-chain only |
 | `jmt-poseidon-bls12381-v1` | `879153d220352224204b1e289af2ad234489f52870857a5ed99e500dad4d49b2` | none yet — runtime gated |
 
-> Only `mpf-blake2b256-v1` appears in any shipped configuration, and it is the
-> only one the examples here run on. The two JMT rows are correct values for
+> Every recipe these examples use seals `mpf-blake2b256-v1`, and it is the
+> only profile the examples here run on. The two JMT rows are correct values for
 > profiles nothing in this repo has booted.
 
 ### Getting these from the Java API instead of a table
@@ -182,7 +196,7 @@ on the JVM, ask the library directly — the catalog is public API, and this nee
 <dependency>
   <groupId>org.yanoproject</groupId>
   <artifactId>yano-core-api</artifactId>
-  <version>0.1.0-pre15</version>
+  <version>0.1.0-pre19</version>
 </dependency>
 ```
 
@@ -256,37 +270,25 @@ Choosing between them:
 - **`jmt-poseidon-bls12381-v1`** exists so its consensus identity is fixed now.
   The shipped verifier reports it as unavailable; you cannot run on it.
 
-You do not choose the fingerprint. The runtime recomputes it from the named
-profile and refuses to start if yours disagrees — it is a tripwire that catches
-a config naming one profile while expecting another format.
+Nobody chooses the fingerprint. The runtime recomputes it from the named
+profile and refuses to start if the sealed value disagrees — a tripwire that
+catches a configuration naming one profile while expecting another format.
 
 ### `genesis-id`
 
-A fresh 32 random bytes, unique to each chain. Not a key, not a secret — it is
-what stops two chains with otherwise identical settings from being mistaken for
-each other, and what binds a proof to *your* chain. It is also what a Cardano
-anchor datum carries as `chainGenesisId`.
+32 bytes unique to each chain. Not a key, not a secret — it is what stops two
+chains with otherwise identical settings from being mistaken for each other,
+and what binds a proof to *your* chain. It is also what a Cardano anchor datum
+carries as `chainGenesisId`.
 
-```bash
-openssl rand -hex 32
-```
+`seal` derives it from the draft's invite (random per draft), the chain id and
+the chain's resolved settings, so every member gets the same value from the
+sealed file, and a fresh `./cluster clean && ./cluster start 3` gives a fresh
+chain. It cannot be changed later without sealing a new application.
 
-Every member of a chain must configure the **same** value; it is shared
-consensus identity and cannot be changed later without starting a new chain.
-
-Two notes that surprise people:
-
-- `GET /state/identity` reports a **different** genesis id than the one you
-  configured. That is expected: the runtime derives the effective value from
-  yours plus the committed application profile.
-- `./yano.sh appchain init` fills this in for you, but **deterministically** —
-  it is derived from the project name and chain id, so re-running it with the
-  same inputs produces the same value. Hand-written configs like the ones in
-  this repo should generate their own.
-
-There is currently no CLI or doc page listing the profiles and their
-fingerprints; `appchain config explain state.commitment-profile` reports
-`BOUNDS <none>` and no allowed values. Hence this table.
+`GET /state/identity` reports a **different** genesis id than the sealed one.
+That is expected: the runtime derives the effective value from it plus the
+committed application profile.
 
 ## Troubleshooting
 
@@ -294,11 +296,16 @@ fingerprints; `appchain config explain state.commitment-profile` reports
 first `ERROR`. Do not `clean` to fix a startup problem; you will lose the
 evidence.
 
-**Ports already in use.** Each example picks its own range. Override it:
+**Ports already in use.** Each example picks its own range. Override it on the
+first start (the ports go into the sealed member cards, so afterwards it takes
+a `./cluster clean`):
 
 ```bash
-EXAMPLE_HTTP_BASE=7200 EXAMPLE_SERVER_BASE=13500 ./cluster start 3
+EXAMPLE_HTTP_BASE=7300 EXAMPLE_SERVER_BASE=13600 ./cluster start 3
 ```
+
+**Changing an example's template after it was sealed.** The sealed file wins
+until you start over: `./cluster clean && ./cluster start 3`.
 
 **"Roots differ" in `tips`.** A fresh cluster needs a second or two for every
 member to catch up. Run it again.

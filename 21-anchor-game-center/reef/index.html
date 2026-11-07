@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reef</title>
+  <meta name="description" content="A shared living world on a Yano X app ledger: every browser grows the same reef from a few kilobytes of placements, and can travel back to any generation.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Crect x='1' y='1' width='3' height='3' fill='%233ee6ff'/%3E%3Crect x='5' y='3' width='3' height='3' fill='%23ff4fd8'/%3E%3Crect x='2' y='6' width='3' height='3' fill='%237dff6a'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="../shared/base.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <a class="back" id="back" href="../">← Game center</a>
+    <div class="reef-logo">REEF</div>
+    <div class="season" id="season">connecting…</div>
+    <div class="chips">
+      <span class="chip">generation <b id="gen">—</b></span>
+      <span class="chip" title="BLAKE2b of the whole world at this generation — every browser computes the same">world hash <b id="hash">—</b></span>
+      <span class="chip">block <b id="blk">—</b></span>
+      <span class="chip">sealed on Cardano <b id="sealed">—</b></span>
+    </div>
+  </header>
+  <div class="banner" id="banner" hidden></div>
+  <div class="main">
+    <div class="stage">
+      <div class="arena">
+        <canvas id="world" aria-label="The reef"></canvas>
+        <div class="travel" id="travel" hidden></div>
+        <div class="catchup" id="catchup" hidden></div>
+        <div class="opening" id="opening" hidden>
+          <h2>A new reef</h2>
+          <p class="small">Its primordial soup comes from the block that finalizes the season’s first message —
+            nobody can know it in advance. Drop a pattern to open it, or press below.</p>
+          <button class="btn primary" id="open-season">Open this season</button>
+        </div>
+      </div>
+      <div class="dock">
+        <div class="palette" id="palette"></div>
+        <div class="tools">
+          <button class="btn" id="rotate" title="Rotate (R)">⟳ Rotate</button>
+          <div class="spores"><span class="small">spores</span><div class="meter" id="meter"></div></div>
+        </div>
+        <div class="timebar">
+          <button class="btn" id="rewind" title="Back to generation 0">⏮</button>
+          <button class="btn" id="playpause" title="Play / pause history (space)">▶</button>
+          <input type="range" id="scrub" min="0" max="0" value="0" aria-label="Generation">
+          <button class="btn live on" id="live" title="Back to now (L)">● LIVE</button>
+          <span class="small mono" id="when"></span>
+        </div>
+      </div>
+    </div>
+    <aside class="side">
+      <div class="card">
+        <h3>Commander</h3>
+        <div id="me-empty" class="small">Not signed in. <button class="link" id="open-auth">Sign in or create one</button></div>
+        <div id="me" hidden>
+          <div class="me">
+            <div class="avatar" id="avatar">?</div>
+            <div>
+              <div><b id="me-name"></b> <span class="badge good">profile on ledger</span></div>
+              <div class="small mono" id="me-key"></div>
+            </div>
+          </div>
+          <div class="me-row">
+            <label class="small">Relay through <select id="relay"></select></label>
+            <button class="link" id="signout">Sign out</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Species at this generation</h3>
+        <ul class="species" id="species"></ul>
+        <canvas class="chart" id="chart" aria-label="Population over time"></canvas>
+        <div class="row"><button class="btn" id="prove-world">Prove this world</button></div>
+      </div>
+      <div class="card">
+        <h3>Placements</h3>
+        <ul class="placements" id="placements"></ul>
+      </div>
+      <div class="card">
+        <h3>The log is the world</h3>
+        <ol class="howto small">
+          <li><b>Tiny messages, a whole world.</b> Only placements are stored — a season is a few kilobytes. Every browser grows the same 16,000 cells from them.</li>
+          <li><b>Certified time.</b> A pattern joins at the generation its block’s certified timestamp names, so every browser stamps it at the same moment.</li>
+          <li><b>Time travel.</b> Drag the timeline to any generation: it is rebuilt from the log, with the same world hash in every browser.</li>
+          <li><b>Sealed on Cardano.</b> Prove any placement — or the whole world at a generation — against the anchored root.</li>
+        </ol>
+      </div>
+    </aside>
+  </div>
+</div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

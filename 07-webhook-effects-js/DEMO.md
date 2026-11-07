@@ -3,7 +3,7 @@
 **Run time:** about 30 seconds · **Audience:** anyone · **Language:** JavaScript
 
 ```bash
-./cluster start 3
+./cluster start 3  # once, takes a minute or two
 ./demo.sh          # starts its own ERP receiver
 ```
 
@@ -49,8 +49,8 @@ Two scopes, and this is the crux:
 
 | | |
 |---|---|
-| *"reaching approval emits an effect"* | **consensus** — every member, in the chain YAML |
-| *"and I am the one who performs it"* | **node-local** — one member, in its own overlay |
+| *"reaching approval emits an effect"* | **consensus** — every member, in the chain template |
+| *"and I am the one who performs it"* | **node-local** — one member, in its own `config/local.yaml` |
 
 If performing it were consensus config, three members would each call the ERP.
 

@@ -9,7 +9,7 @@ anything, so nothing a Yano node might claim can change the answer.
 |---|---|
 | Capability | `anchor:script` (Plutus V3 thread NFT), `state:ordered-log` |
 | Members | 3 nodes, threshold 2 |
-| Needs | Java 25, Maven, `curl`, `jq`, `python3` |
+| Needs | Java 25, Maven, `curl`, `jq`, `python3`, Yano X 0.1.0-pre6 |
 | Network | Local devnet — the anchor is a real Cardano transaction |
 
 ## The question the other examples leave open
@@ -55,7 +55,7 @@ one is current. The asset name is the chain id.
 ## Run it
 
 ```bash
-./cluster start 3    # ~40s, anchoring bootstrapped automatically
+./cluster start 3    # a minute or two the first time; anchoring starts automatically
 mvn -B package
 ./demo.sh            # ~15s
 ```
@@ -126,8 +126,8 @@ the open, and permanently.
 ## Files
 
 ```
-chain/application-appchain.yml   the chain definition
-cluster                          start / stop / status
+chain/evidence.template.yaml     the application as an app-chain template (commented)
+cluster                          start / stop / status: seals and runs the template
 demo.sh                          the guided walkthrough
 src/main/java/.../
   L1Anchor.java                  read the anchor UTxO from Cardano, decode the datum
@@ -142,22 +142,24 @@ bundle.json                      written by `export` (gitignored)
 ## Limits
 
 - **An anchor is periodic.** Records between anchors are finalized but not yet
-  on Cardano. `--anchor-every` controls the cadence; every anchor is a
-  fee-paying L1 transaction, so it is a cost/latency trade.
+  on Cardano. `every-blocks` in the template controls the cadence; every
+  anchor is a fee-paying L1 transaction, so it is a cost/latency trade.
 
 - **This proves inclusion at the anchored height, not the current state.** A key
   deleted after that height still verifies as present *at that height* — which
   is correct, and worth being precise about when quoting it.
 
 - **Trusting Cardano means trusting your Cardano source.** Here that is the
-  local devnet node. A real verifier uses a node or resolver it trusts, and
-  should confirm L1 stability depth before relying on a recent anchor.
+  local devnet node, which the lead member (node0) runs and serves on port
+  7150. A real verifier uses a node or resolver it trusts, and should confirm
+  L1 stability depth before relying on a recent anchor.
 
 - **The datum says who the members were, not that they were entitled to be.**
   Membership is a configured key list. The anchor makes it public and
   tamper-evident; it does not make it permissionless.
 
-- **Devnet, demo keys.** The anchor wallet is faucet-funded by the launcher.
+- **Devnet, demo keys.** `./cluster start` runs `yano.sh appchain anchor`, which
+  creates the anchor wallet and funds it on the devnet.
 
 ## Related
 

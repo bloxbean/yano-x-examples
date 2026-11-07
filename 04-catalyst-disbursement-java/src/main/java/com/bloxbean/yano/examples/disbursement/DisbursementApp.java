@@ -318,10 +318,10 @@ public final class DisbursementApp {
 
         System.out.println("  2. anchoring      the app chain's state root, published periodically");
         if (status == null || status.isMissingNode() || !status.path("enabled").asBoolean(false)) {
-            System.out.println("     not enabled — start with ./cluster start 3 --anchor-mode metadata");
+            System.out.println("     not enabled — ./cluster start 3 anchors unless given --no-anchor");
             return;
         }
-        System.out.printf("     anchor wallet  %s%n", status.path("address").asText());
+        System.out.printf("     anchor wallet  %s%n", anchorWallet(status));
         System.out.printf("     anchored       %d time(s), last at height %d%n",
                 status.path("anchoredCount").asLong(), status.path("lastAnchoredHeight").asLong());
         String lastTx = status.path("lastAnchorTx").asText("");
@@ -340,9 +340,18 @@ public final class DisbursementApp {
                   every approval above is committed under.""");
     }
 
+    /**
+     * The wallet that pays the anchoring fees. In script mode the status also
+     * names the anchor script's address; the fees come from the wallet.
+     */
+    private static String anchorWallet(com.fasterxml.jackson.databind.JsonNode status) {
+        String wallet = status.path("walletAddress").asText("");
+        return wallet.isEmpty() ? status.path("address").asText("") : wallet;
+    }
+
     /** Fund the anchor wallet from the devnet faucet. */
     private void fundAnchor(long ada) {
-        String address = chain.anchorStatus().path("address").asText("");
+        String address = anchorWallet(chain.anchorStatus());
         if (address.isEmpty()) {
             throw new IllegalStateException("anchoring is not enabled on this cluster");
         }
@@ -381,7 +390,7 @@ public final class DisbursementApp {
                 What reviewers sign is the payout transaction's id, which IS the hash of
                 its body — so the approval names exactly one payment.
 
-                The chain must be running: ./cluster start 3 --anchor-mode metadata
+                The chain must be running: ./cluster start 3
                 """);
     }
 

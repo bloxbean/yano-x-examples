@@ -1,0 +1,62 @@
+{
+  "schemaVersion": "v1alpha1",
+  "catalogId": "sealed-duels-plugin",
+  "bundleId": "plugin-bundle.sealed-duels",
+  "bundleVersion": "1.0.0",
+  "artifact": {
+    "id": "plugin.sealed-duels",
+    "availability": "REFERENCE",
+    "bundleId": "plugin-bundle.sealed-duels",
+    "nativePosture": "unsupported",
+    "runtimeTypes": [
+      "jvm"
+    ],
+    "deploymentTargets": [
+      "host",
+      "docker-compose"
+    ]
+  },
+  "capabilities": [
+    {
+      "id": "state:sealed-duels",
+      "name": "Sealed Duels",
+      "category": "state",
+      "availability": "REFERENCE",
+      "maturity": "experimental",
+      "scope": "chain",
+      "selectable": true,
+      "trustStatement": "Operator-owned custom JVM plugin; review before use.",
+      "description": "Commit–reveal rocket duels from the Yano X game center, with the rules run by the members: invalid moves are refused at admission and each duel record is committed to the state root.",
+      "provides": [
+        "state-machine"
+      ],
+      "requires": [],
+      "implies": [],
+      "conflicts": [],
+      "runtimeTypes": [
+        "jvm"
+      ],
+      "deploymentTargets": [
+        "host",
+        "docker-compose"
+      ],
+      "artifacts": [
+        "plugin.sealed-duels"
+      ],
+      "nativePosture": "unsupported",
+      "externalPrerequisites": [
+        "reviewed-plugin-jar"
+      ],
+      "bootstrapRequirements": [
+        "copy-plugin-to-every-jvm-node"
+      ],
+      "nonSecretAnswers": [],
+      "secretReferences": {},
+      "properties": {
+        "state-machine": "sealed-duels"
+      },
+      "documentation": "README.md",
+      "acceptanceScenario": "custom-plugin-owned"
+    }
+  ]
+}

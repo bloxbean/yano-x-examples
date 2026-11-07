@@ -3,7 +3,7 @@
 **Run time:** about 15 seconds · **Audience:** anyone · **Language:** Java
 
 ```bash
-./cluster start 3
+./cluster start 3     # once, takes a minute or two
 mvn -B package
 ./demo.sh
 ```
@@ -42,12 +42,12 @@ $ anchor record "inspection certificate C-8841 issued 2026-09-22"
 ```
   mode             script
   bootstrapped     true
-  anchored         1 time(s)
+  anchored         1 time(s) since this node started
   last height      1
   script address   addr_test1wr66hmkdhqkwrlnxlcryyh0e258q6yej45cz8e2tvxh48nc2efza6
 ```
 
-Anchoring is on by default and was bootstrapped when the cluster started — a
+Anchoring is on by default and was started with the cluster — a
 Plutus V3 thread NFT was minted for this chain and parked at a validator
 address.
 
@@ -207,5 +207,5 @@ $A record "too recent"
 $A export <that message id>
 
 ./cluster stop     # keep data
-./cluster clean    # wipe
+./cluster clean    # stop and wipe .yano/ (chain, member keys, devnet)
 ```

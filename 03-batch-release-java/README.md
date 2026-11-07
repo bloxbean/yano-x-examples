@@ -9,10 +9,10 @@ replaced, and the batches she already certified stay certified.
 
 | | |
 |---|---|
-| Capability | `state:role-approvals` (preview), `anchor:metadata`, governed membership |
+| Capability | `state:role-approvals` (preview), `anchor:script`, governed membership |
 | Members | 3 nodes, threshold 2 |
 | Actors | 10 people, 3 organizations, 3 policies |
-| Needs | Java 25, Maven, `curl`, `jq`, `python3` |
+| Needs | Java 25, Maven, `curl`, `jq`, Yano X 0.1.0-pre6 |
 | Network | Local devnet, anchored to its Cardano L1 — no funds, no external node |
 
 ## The terms
@@ -73,18 +73,22 @@ Two distinctness modes, each for a reason that comes from the domain:
 ## Run it
 
 ```bash
-./cluster start 3   # ~40s, anchoring bootstrapped automatically
+./cluster start 3   # a minute or two the first time, anchoring started automatically
 mvn -B package
 ./demo.sh           # the walkthrough (~30s)
 ```
 
 `demo.sh` registers the cast itself on a fresh chain — the ceremony is
 idempotent, so it is skipped when already done. Run it on its own with
-`java -jar target/batch-release.jar bootstrap`.
+`java -jar target/batch-release.jar bootstrap`. (`seal` also writes a
+`batch-release-chain.role-plan.yaml` template under `.yano/app/` for the
+release's generic `yano.sh appchain role bootstrap`; this example does the same
+ceremony in Java instead, in `Registry.java`.)
 
 ```bash
 ./cluster stop        # stop, keep data
-./cluster clean       # stop and wipe
+./cluster stop 2      # stop just member 2
+./cluster clean       # stop and wipe .yano/ (chain, member keys, devnet)
 ```
 
 ## Use it directly
@@ -189,17 +193,17 @@ is three rounds rather than 45 sequential waits.
 ## Files
 
 ```
-chain/application-appchain.yml   the chain definition
-cluster                          start / stop / status
-demo.sh                          the guided walkthrough
+chain/batch-release.template.yaml  the application as an app-chain template
+cluster                            start / stop / status: seals and runs the template
+demo.sh                            the guided walkthrough
 src/main/java/.../
-  Cast.java                      organizations, people, roles, demo keys
-  Policies.java                  the three stages as policies
-  BatchRecord.java               canonical payload bytes and stage chaining
-  Registry.java                  governed registry changes
-  Stages.java                    opening stages and casting decisions
-  Chain.java                     member clients and the domain API
-  BatchReleaseApp.java           the command line
+  Cast.java                        organizations, people, roles, demo keys
+  Policies.java                    the three stages as policies
+  BatchRecord.java                 canonical payload bytes and stage chaining
+  Registry.java                    governed registry changes
+  Stages.java                      opening stages and casting decisions
+  Chain.java                       member clients and the domain API
+  BatchReleaseApp.java             the command line
 ```
 
 ## Future enhancements
@@ -234,8 +238,8 @@ revision, at this height*. It does not prove the stages happened in order.
 - **`role-approvals` is `preview` maturity**, not `stable` like `ordered-log` or
   `kv-registry`.
 - **Anchoring is script mode** on a local devnet — a Plutus V3 thread NFT per
-  chain with a validator-enforced datum chain, faucet-funded by the launcher. A
-  real deployment funds and guards that key itself.
+  chain with a validator-enforced datum chain, funded on the devnet by
+  `./cluster start`. A real deployment funds and guards that key itself.
 
 ## Where to go next
 

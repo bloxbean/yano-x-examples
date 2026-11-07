@@ -1,0 +1,30 @@
+# Example 03 as an app-chain template: pharmaceutical batch release.
+#
+# ./cluster start turns it into a draft with
+#   yano.sh appchain new batch-release --from chain/batch-release.template.yaml
+# then runs the ordinary setup commands (request, seal, join, start) for three
+# local members on a private devnet. seal fixes the operators, threshold, member
+# keys, plugin digests and the chain's genesis identity; nothing here is per node.
+#
+# The organizations, actors and policies are NOT here. They are governed data,
+# registered on the running chain by `batch-release.jar bootstrap` (demo.sh runs
+# it), and their administrators are the app-chain members at the genesis
+# threshold - the profile derives them from the genesis membership epoch.
+membership: governed   # the member set is itself finalized in chain history
+sequencing: fixed      # the lead (node0) proposes every block
+chains:
+  # The release's role-approval recipe: the role-approvals composite, a governed
+  # organization/actor registry plus a role-aware approval workflow.
+  - id: batch-release-chain
+    recipe: role-approval
+    settings:
+      # 200ms blocks keep the walkthrough responsive: each command waits for
+      # its message to finalize, and that wait dominates the demo's runtime.
+      block.interval-ms: "200"
+      # Lifetimes are counted in BLOCKS, so a faster chain shortens every
+      # deadline in wall-clock terms. 18000 blocks is an hour at 200ms - long
+      # enough that a governed change cannot expire while someone is talking
+      # through the demo. The limit is 1,000,000.
+      machines.composite.roles.maximum-mutation-lifetime-blocks: "18000"
+    # ./cluster start anchors it to Cardano in script mode (--no-anchor skips it).
+    anchor: {mode: script, every-blocks: 10}

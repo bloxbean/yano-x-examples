@@ -9,7 +9,7 @@ back into consensus, where every member agrees on it.
 |---|---|
 | Capability | `state:approval-workflow`, `effects:runtime`, `effects:on-approved`, `executor:webhook` |
 | Members | 3 nodes, threshold 2 — **only member 0 runs the executor** |
-| Needs | Node.js 20+, Java 25 (to run the chain), `curl`, `jq`, `python3` |
+| Needs | Node.js 20+, Java 25 (to run the chain), `curl`, `jq`, Yano X 0.1.0-pre6 |
 | Dependencies | **none** — no npm install |
 
 ## The problem
@@ -55,30 +55,33 @@ This is the part worth understanding, and it is visible in two files:
 
 | Setting | Scope | Where |
 |---|---|---|
-| `state-machine: approvals` | consensus | `chain/application-appchain.yml` |
-| `effects.enabled` | consensus | `chain/application-appchain.yml` |
-| `machines.approvals.on-approved-effect.*` | consensus | `chain/application-appchain.yml` |
-| `effects.executor.enabled` | **node-local** | generated `node0.properties` |
-| `effects.executors.webhook.url` | **node-local** | generated `node0.properties` |
+| `recipe: approval-workflow` | consensus | `chain/release-approvals.template.yaml` |
+| `effects.enabled` | consensus | `chain/release-approvals.template.yaml` |
+| `machines.approvals.on-approved-effect.*` | consensus | `chain/release-approvals.template.yaml` |
+| `effects.executor.enabled` | **node-local** | node0's `config/local.yaml` |
+| `effects.executors.webhook.url` | **node-local** | node0's `config/local.yaml` |
 
 *"Reaching approval emits an effect"* is consensus — every member must agree,
 or they would disagree about what the block did. *"And I am the one who
 performs it"* is node-local — if it were consensus, all three members would
 call the ERP.
 
-The `./cluster` script generates the per-node overlays, so the split is
-reproducible rather than something you have to set up by hand:
+`seal` fixes the consensus settings for every member. The `./cluster` script
+writes node0's `config/local.yaml` (under `chains[<i>]`, the index `join` gave
+release-chain), so the split is reproducible rather than something you have to
+set up by hand:
 
 ```bash
 ./cluster start 3     # node0 gets the executor settings; node1, node2 do not
 ```
 
-Point it somewhere else with `RECEIVER_URL=... ./cluster start 3`.
+Point it somewhere else with `RECEIVER_URL=... ./cluster start 3` (after
+`./cluster stop 0`, if node0 is already running).
 
 ## Run it
 
 ```bash
-./cluster start 3     # ~40s
+./cluster start 3     # a minute or two the first time
 npm run receiver      # in another terminal — the ERP
 ./demo.sh             # ~30s
 ```
@@ -166,8 +169,11 @@ This is easy to get wrong, and the 5xx demo is what exposes it.
 ## Files
 
 ```
-chain/application-appchain.yml   consensus settings — the emission rule
-cluster                          generates the node-local executor overlays
+chain/release-approvals.template.yaml
+                                 the application as an app-chain template:
+                                 consensus settings — the emission rule
+cluster                          seals and runs it; writes node0's executor
+                                 settings to its config/local.yaml
 receiver.js                      the ERP endpoint, with failure modes
 demo.sh                          the guided walkthrough
 src/

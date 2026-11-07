@@ -1,0 +1,14 @@
+{
+  "name": "yano-x-anchor-canvas-game",
+  "version": "1.0.0",
+  "description": "Yano X example 20 — a shared pixel wall on an app ledger, wallet-signed and anchored to Cardano",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --no-warnings test/run.mjs",
+    "start": "node serve.mjs"
+  }
+}
