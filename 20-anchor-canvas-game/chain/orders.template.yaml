@@ -1,0 +1,24 @@
+# A local stand-in for the showcase's orders-chain, as an app-chain template.
+#
+# ./cluster start turns it into a draft with
+#   yano.sh appchain new orders --from chain/orders.template.yaml
+# then runs the ordinary setup commands (request, seal, join, start) for three
+# local members on a private devnet. seal fixes the operators, threshold, member
+# keys and the chain's genesis identity; nothing here is per node.
+membership: static     # the member set is fixed at seal
+sequencing: fixed      # the lead (node0) proposes every block
+chains:
+  # The stock ordered-log machine (the release's audit-log recipe), which agrees
+  # on one order of opaque messages and never reads them. The game rules live in
+  # the browser (js/game.js), so no plugin is needed. The id matches the
+  # showcase's, so the page needs no change to play against it.
+  - id: orders-chain
+    recipe: audit-log
+    settings:
+      # A block every second, like the showcase.
+      block.interval-ms: "1000"
+    # ./cluster start anchors it to Cardano in script mode (--no-anchor skips
+    # it). Every 2 blocks, so a local seal follows a move within seconds; the
+    # showcase anchors every 30. ordered-log makes no empty blocks, so an idle
+    # chain does not anchor.
+    anchor: {mode: script, every-blocks: 2}
