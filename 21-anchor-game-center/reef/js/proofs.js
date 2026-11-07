@@ -1,13 +1,13 @@
-// Proving the reef. A placement: signed by its commander, recorded at its
+// Proving the reef. A placement: signed by its commander's session key, recorded at its
 // block, landing at the generation that block's certified time names. The
 // world at a generation: rebuilt here from the soup (seeded by the opening
 // block's state root) and every placement up to that generation, all of them
 // recorded under the root anchored on Cardano — so anyone can recompute the
 // same world and the same world hash.
 
-import { ed25519Verify, fromHex, toHex, utf8 } from '../../shared/crypto.js';
-import { MESSAGE_SUBJECT, rootChecks, typedProof } from '../../shared/proofs.js';
-import { PATTERNS, census, seasonSeed, seedStatement, worldHash } from './reef.js';
+import { toHex } from '../../shared/crypto.js';
+import { MESSAGE_SUBJECT, authorshipChecks, rootChecks, typedProof } from '../../shared/proofs.js';
+import { PATTERNS, census, seasonSeed, worldHash } from './reef.js';
 
 async function recorded(ledger, cfg, refs, view) {
   let proof = null;
@@ -20,21 +20,19 @@ async function recorded(ledger, cfg, refs, view) {
   return { proof, count };
 }
 
-export async function provePlacement(cfg, ledger, reef, p, { threshold } = {}) {
+export async function provePlacement(cfg, ledger, moves, reef, p, { threshold } = {}) {
   const player = reef.players.get(p.id);
   const message = await ledger.message(cfg.movesChain, p.messageId);
-  let body = null;
-  try { body = JSON.parse(new TextDecoder().decode(fromHex(message.bodyHex))); } catch { /* checked below */ }
-  const signed = !!body && await ed25519Verify(fromHex(player.pub), fromHex(body.sig),
-    utf8(seedStatement(cfg, reef.season, body.id, body.n, body.pattern, body.x, body.y, body.rot)));
+  const { checks: signed, body } = await authorshipChecks(moves, message, p.id, player.pub);
   const block = await ledger.block(cfg.movesChain, p.height);
   const gen = Math.floor(((block?.timestamp ?? 0) - reef.origin.timestamp) / cfg.genMs) + 1;
   const anchor = await ledger.anchor(cfg.movesChain);
   const sealed = !!anchor && p.height <= anchor.anchoredHeight;
   const { proof, count } = await recorded(ledger, cfg, [p], sealed ? 'latest-confirmed-anchor' : 'latest');
   const checks = [
-    { ok: signed && body.pattern === p.pattern && body.x === p.x && body.y === p.y,
-      text: `${p.id} signed “${PATTERNS[p.pattern].name} at ${p.x},${p.y}” with their commander key` },
+    ...signed,
+    { ok: body?.pattern === p.pattern && body?.x === p.x && body?.y === p.y,
+      text: `the signed move is “${PATTERNS[p.pattern].name} at ${p.x},${p.y}”` },
     { ok: gen === p.gen, text: `block #${p.height} was certified ${((block.timestamp - reef.origin.timestamp) / 1000).toFixed(1)} s into the season: generation ${gen}` },
     { ok: count === 1, text: `recorded at block #${p.height} on this season’s topic` },
   ];

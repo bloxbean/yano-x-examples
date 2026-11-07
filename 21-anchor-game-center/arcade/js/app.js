@@ -5,7 +5,7 @@
 
 import { CONFIG } from './config.js';
 import { FIRE, FPS, H, LEFT, RIGHT, RUN_FRAMES, Run, THRUST, W } from './sim.js';
-import { Arcade, encodeInputs, fieldOf, fieldTopic, inputsHash, runStatement } from './runs.js';
+import { Arcade, encodeInputs, fieldOf, fieldTopic } from './runs.js';
 import { GHOST_COLORS, Renderer } from './render.js';
 import { proveRun } from './proofs.js';
 import { ACCOUNTS, applyProxy, withQuery } from '../../shared/config.js';
@@ -15,11 +15,13 @@ import { proveProfile } from '../../shared/proofs.js';
 import { ProofPanel, esc, reportReachability, toast, txLink } from '../../shared/ui.js';
 import { blake2b } from '../../shared/blake2b.js';
 import { ed25519Supported, fromHex, toHex, utf8 } from '../../shared/crypto.js';
+import { connectMoves, showSession } from '../../shared/sessions.js';
 
 const $ = (id) => document.getElementById(id);
 const proxy = await applyProxy();
 const ledger = new Ledger(CONFIG, { proxy });
 const session = new Session(ledger);
+const moves = await connectMoves(ledger, CONFIG, session, () => renderSide());
 const panel = new ProofPanel();
 const renderer = new Renderer($('game'));
 $('back').href = withQuery('../');
@@ -80,7 +82,7 @@ async function sync() {
     do {
       again = false;
       const a = arcade;
-      const entries = await ledger.entriesFrom(CONFIG.movesChain, fieldTopic(CONFIG, a.field), a.position.height);
+      const entries = await moves.entries(fieldTopic(CONFIG, a.field), a.position.height);
       for (const entry of entries) {
         let result;
         try {
@@ -164,7 +166,7 @@ async function play() {
     ui.opening = true;
     $('prompt-note').textContent = 'Opening the field — its rocks come from the block that finalizes this…';
     try {
-      await ledger.submit(CONFIG.movesChain, session.relay, fieldTopic(CONFIG, arcade.field), { body: '{"t":"open"}' });
+      await moves.submit(c, session.relay, fieldTopic(CONFIG, arcade.field), { t: 'open' });
       for (let i = 0; i < 60 && !arcade.seed; i++) { await new Promise((r) => setTimeout(r, 250)); await sync(); }
     } catch (error) {
       toast(`Could not open the field: ${error.message}`, 'info');
@@ -268,7 +270,7 @@ async function finish() {
   const encoded = encodeInputs(frames);
   const steps = [
     { title: 'Inputs recorded', sub: `${RUN_FRAMES.toLocaleString()} frames · ${encoded.length.toLocaleString()} bytes`, ms: '' },
-    { title: 'Signed with your commander key', sub: `Ed25519 · ${c.id}`, ms: '' },
+    { title: 'Signed with your session key', sub: `Ed25519 · ${CONFIG.scope} · ${c.id}`, ms: '' },
     { title: `Finalized on ${CONFIG.movesChain}`, sub: 'waiting for the members…', ms: '' },
     { title: 'Replayed by this browser', sub: 'the score must come out of your inputs', ms: '' },
     { title: 'Sealed on Cardano', sub: 'at the next anchor', ms: '' },
@@ -288,14 +290,12 @@ async function finish() {
   try {
     const t0 = performance.now();
     const n = ui.nonce = Math.max(Date.now(), ui.nonce + 1);
-    const statement = runStatement(CONFIG, ui.playField, ui.playSeed, c.id, n, inputsHash(encoded), run.score);
-    const sig = await c.sign(statement);
-    steps[1].ms = `${Math.max(1, Math.round(performance.now() - t0))} ms`;
-    at = 2; draw();
-    const body = JSON.stringify({ t: 'run', id: c.id, pub: c.pub, n, seed: ui.playSeed, inputs: toHex(encoded), score: run.score, sig });
-    const submitted = performance.now();
+    const move = { t: 'run', id: c.id, pub: c.pub, n, seed: ui.playSeed, inputs: toHex(encoded), score: run.score };
     const outcome = new Promise((resolve) => { ui.pendingRun = { resolve }; });
-    const { messageId } = await ledger.submit(CONFIG.movesChain, session.relay, fieldTopic(CONFIG, ui.playField), { body });
+    const submitted = performance.now();
+    const { messageId } = await moves.submit(c, session.relay, fieldTopic(CONFIG, ui.playField), move);
+    steps[1].ms = `${Math.max(1, Math.round(submitted - t0))} ms`;
+    at = 2; draw();
     ui.pendingRun.messageId = messageId;
     let message = null;
     for (let i = 0; i < 120 && !message; i++) {
@@ -413,6 +413,7 @@ function renderSide() {
     $('me-name').textContent = c.id;
     $('me-key').textContent = `key ${c.pub.slice(0, 6)}…${c.pub.slice(-4)}`
       + (session.profileHeight ? ` · profile at height ${session.profileHeight}` : '');
+    showSession($('me-key'), moves);
   }
 }
 
@@ -432,7 +433,7 @@ function openRun(run) {
     </div>
     <div class="proof-out"></div>`);
   body.querySelector('#prove-run').onclick = () => panel.run(
-    () => proveRun(CONFIG, ledger, arcade, run, { threshold: ui.status?.threshold ?? 1 }), `${run.id}’s run`);
+    () => proveRun(CONFIG, ledger, moves, arcade, run, { threshold: ui.status?.threshold ?? 1 }), `${run.id}’s run`);
   body.querySelector('#prove-profile').onclick = () => panel.run(
     () => proveProfile(ledger, session.profiles, run.id, { threshold: ui.status?.threshold ?? 1, expectPub: run.pub }),
     `${run.id}’s profile`);

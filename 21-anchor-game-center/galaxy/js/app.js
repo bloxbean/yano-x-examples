@@ -4,7 +4,7 @@
 // it run ahead to "now" every frame.
 
 import { CONFIG } from './config.js';
-import { Galaxy, moveStatement, roundOf, roundTopic } from './galaxy.js';
+import { Galaxy, roundOf, roundTopic } from './galaxy.js';
 import { Renderer, playerColor } from './render.js';
 import { proveMove } from './proofs.js';
 import { ACCOUNTS, applyProxy, withQuery } from '../../shared/config.js';
@@ -13,12 +13,14 @@ import { Session } from '../../shared/auth.js';
 import { proveProfile } from '../../shared/proofs.js';
 import { ProofPanel, esc, reportReachability as showUnreachable, toast, txLink } from '../../shared/ui.js';
 import { ed25519Supported } from '../../shared/crypto.js';
+import { connectMoves, showSession } from '../../shared/sessions.js';
 
 const $ = (id) => document.getElementById(id);
 const proxy = await applyProxy();
 const ledger = new Ledger(CONFIG, { proxy });
 const session = new Session(ledger);
 const profiles = session.profiles;
+const moves = await connectMoves(ledger, CONFIG, session, () => renderSide());
 const panel = new ProofPanel();
 const renderer = new Renderer($('sky'), CONFIG);
 $('back').href = withQuery('../');
@@ -107,7 +109,7 @@ async function sync() {
     do {
       again = false;
       const g = galaxy;
-      const entries = await ledger.entriesFrom(CONFIG.movesChain, roundTopic(CONFIG, g.round), g.position.height);
+      const entries = await moves.entries(roundTopic(CONFIG, g.round), g.position.height);
       for (const entry of entries) {
         let result;
         try {
@@ -199,9 +201,7 @@ async function maybeJoin() {
   ui.joining = true;
   try {
     const n = nextNonce();
-    const sig = await c.sign(moveStatement(CONFIG, g.round, 'join', c.id, n, [c.pub]));
-    const body = JSON.stringify({ t: 'join', id: c.id, pub: c.pub, n, sig });
-    const { messageId } = await ledger.submit(CONFIG.movesChain, ui.relay, roundTopic(CONFIG, g.round), { body });
+    const { messageId } = await moves.submit(c, ui.relay, roundTopic(CONFIG, g.round), { t: 'join', id: c.id, pub: c.pub, n });
     ui.pending.set(messageId, { kind: 'join', at: performance.now(), submitted: Date.now() });
   } catch (error) {
     ui.joining = false;
@@ -220,10 +220,8 @@ async function launch(from, to) {
   if (ships < 1) { toast('Not enough ships there yet', 'info'); return; }
   try {
     const n = nextNonce();
-    const sig = await c.sign(moveStatement(CONFIG, g.round, 'go', c.id, n, [from, to, ui.ratio]));
-    const body = JSON.stringify({ t: 'go', id: c.id, n, from, to, pct: ui.ratio, sig });
     const submitted = Date.now();
-    const { messageId } = await ledger.submit(CONFIG.movesChain, ui.relay, roundTopic(CONFIG, g.round), { body });
+    const { messageId } = await moves.submit(c, ui.relay, roundTopic(CONFIG, g.round), { t: 'go', id: c.id, n, from, to, pct: ui.ratio });
     ui.pending.set(messageId, { kind: 'go', from, to, ships, owner: me.index, at: performance.now(), submitted });
   } catch (error) {
     toast(`Launch failed: ${error.message}`, 'info');
@@ -302,6 +300,7 @@ function renderSide() {
     $('me-name').textContent = c.id;
     $('me-key').textContent = `key ${c.pub.slice(0, 6)}…${c.pub.slice(-4)}`
       + (ui.profileHeight ? ` · profile at height ${ui.profileHeight}` : '');
+    showSession($('me-key'), moves);
   }
 }
 
@@ -428,7 +427,7 @@ function openPlanet(id) {
     </div>
     <div class="proof-out"></div>`);
   if (taken && final) {
-    body.querySelector('#prove-move').onclick = () => panel.run(() => proveMove(CONFIG, ledger, g, p.taken,
+    body.querySelector('#prove-move').onclick = () => panel.run(() => proveMove(CONFIG, ledger, moves, g, p.taken,
       g.players[p.taken.owner], { threshold: ui.status?.threshold ?? 1 }),
       `${taken.kind === 'join' ? 'join' : 'launch'} by ${g.players[p.taken.owner].id}`);
   }

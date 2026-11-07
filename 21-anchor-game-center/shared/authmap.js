@@ -37,6 +37,8 @@ export function putIfAbsentEnvelope(collection, key, value) {
  * The record is [version, status, revision, controller, value, valueHash, createdHeight, lastMutationHeight].
  */
 export function decodeEntry(response) {
+  // A chain with nothing committed yet answers 404: nothing is present at height 0.
+  if (!response) return { committedHeight: 0, present: false };
   const base = { committedHeight: response.committedHeight };
   if (response.record?.presence !== 1 || !response.recordValue) return { ...base, present: false };
   const [, status, revision, controller, value, , createdHeight, lastMutationHeight] =

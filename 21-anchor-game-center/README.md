@@ -6,9 +6,20 @@ game from the finalized log, with no game server; and the ledgers are sealed
 on Cardano in the background. Any move, run or profile can be proven against
 the Cardano anchor from inside the game.
 
-The games use static HTML, CSS and ES modules with no build step or npm
-install. Neon Rush additionally uses the small external
-[delegation service](delegation/README.md) to authorize temporary session keys.
+**One state machine, many games, and the player signs.** Seven of the games
+share one chain, `games-chain`, running the stock `ordered-log` machine. Its
+topic registry protects the `games/` namespace: each game has its own entry
+(`games/galaxy/`, `games/arcade/`, …) and every round, field, duel or season is
+a topic below it. The members accept a move there only if the player's own
+**session key** signed it, under a one-hour credential from the game
+publisher's delegation service. Nobody else can move for a player, including the
+member that relays the move. See [Session keys](#session-keys-the-player-signs-every-move).
+
+The pages are static HTML, CSS and ES modules, with no build step and no npm
+install. The only server-side piece is the small [delegation service](delegation/),
+which holds the publisher's issuer key.
+
+Requires **Yano X 0.1.0-pre6** or later (topic policies, ADR-038).
 
 | Game | What it is | What the ledger does |
 |---|---|---|
@@ -25,52 +36,66 @@ install. Neon Rush additionally uses the small external
 | | |
 |---|---|
 | Accounts | call sign + password, on `authenticated-map-chain` (`attachments` collection); the password never leaves the browser |
-| Moves | `orders-chain` for most games; `neon-rush-chain` for protected Neon Rush topics; Land Rush claims on `authenticated-map-chain`; the duels' plugin edition on `duels-chain` |
+| Moves | `games-chain` (stock `ordered-log`, topic policies on): `games/<game>/<round, field, duel or season>`, each move signed by the player's session key. Land Rush claims are entries on `authenticated-map-chain`; the duels' plugin edition uses `duels-chain` (the example's own `sealed-duels` machine) |
+| Who may write a game topic | the publisher's issuer key, or a session key it delegated for that game (one hour, one game), checked by every member before a move is stored |
 | Finality | a threshold of members, about one block a second |
-| Anchoring | Cardano (devnet locally, preprod on the showcase), in the background |
-| Dependencies | none — WebCrypto (Ed25519, PBKDF2, AES-GCM) plus small CBOR and BLAKE2b helpers |
+| Anchoring | Cardano (devnet locally), script mode, in the background |
+| Dependencies | none in the browser: WebCrypto (Ed25519, PBKDF2, AES-GCM), small CBOR and BLAKE2b helpers, and the release's topic client ([`shared/topic-client/`](shared/topic-client/)) |
 
 ## Play locally
 
+You need Java 25, Node.js 20 or later, `curl` and `jq`, and the
+**Yano X 0.1.0-pre6** JVM distribution extracted beside the examples
+(`yano-x-jvm-0.1.0-pre6/`), or `YANO_X_DIST` pointing at it.
+
 ```bash
-(cd plugin && ./gradlew build)   # the sealed-duels plugin for duels-chain (Java 25)
-./cluster start 3          # four chains; devnet anchoring (~1 min first time)
-YANO_NODES=http://127.0.0.1:7210,http://127.0.0.1:7211,http://127.0.0.1:7212 node serve.mjs
+./cluster start            # builds the duels plugin if needed, seals and starts three members,
+                           # anchors the chains, registers games/ and the seven game entries (~2 min first time)
+node serve.mjs --local     # the site, a same-origin proxy and the delegation service
 # open http://localhost:8787/?proxy=1
 ```
 
 Create a commander on the hub page, then pick a game; the sign-in carries to
-every game (same origin, same `localStorage`). To play against yourself, open
-`http://127.0.0.1:8787/?proxy=1` too — a different origin, so a separate
-browser identity.
-
-Neon Rush requires its fresh-chain topic setup and service configuration in
-[delegation/README.md](delegation/README.md). The page reports a missing setup
-instead of sending unframed writes. The configured public showcase has not
-been changed by this reference implementation.
+every game (same origin, same `localStorage`). The first time you open a game,
+its page asks the delegation service for a session key; the side panel shows
+it (`session 3f2a…91 · games/galaxy/ · until 14:05`). To play against
+yourself, open `http://127.0.0.1:8787/?proxy=1` too: a different origin, so a
+separate browser identity.
 
 ```bash
-./cluster stop             # keep the chains and the commanders
-./cluster clean            # stop and wipe .yano/
+./cluster status           # stage, members, each chain's height and anchoring
+./cluster topics           # the effective policy of games/ and every game entry
+./cluster stop             # keep the chains, commanders and keys
+./cluster clean            # stop and delete .yano/ (chains, member keys, publisher keys)
 ```
 
-`./cluster start` generates the authenticated-map genesis for the local
-membership with the release's own generator and hands it to each node as a
-per-node property overlay. The chain file allow-lists the validator bundle,
-which authenticated-map requires before it will start, and the duels plugin.
-`start` stages the release's plugins plus the duels JAR in
-`.yano/node-plugins/`, leaving the distribution untouched.
+`./cluster start` runs the release's own setup commands, as three operators
+would: `yano.sh appchain new games --from chain/games.template.yaml`, then
+`request` for each member, `seal`, `join`, `start` (the lead first), and
+`anchor` for each chain. The members run from `.yano/release/`, a private view
+of the distribution whose `plugins/` holds the release's bundles plus the
+sealed-duels JAR, so the extracted distribution is never modified. `seal` pins
+every plugin digest and `join` refuses a member whose plugins differ.
 
-A cluster started before `duels-chain` existed keeps its chains:
-`./cluster stop && ./cluster migrate && ./cluster start 3` appends the new
-chain and leaves the others at their heights. See
-[ADD_A_CHAIN.md](ADD_A_CHAIN.md), which also covers the showcase.
+Then [`delegation/setup.mjs`](delegation/setup.mjs) plays the game publisher:
 
-Against the showcase: `node serve.mjs` without `YANO_NODES` proxies the five
-showcase members, which run both stock chains with the same `attachments`
-collection. They do not run `duels-chain` until it is installed there
-([ADD_A_CHAIN.md](ADD_A_CHAIN.md)). A copy on GitHub Pages needs the members to allow its origin in
-CORS (see example 20).
+1. It makes two keys in `.yano/games/secrets/` (owner-only): `publisher.seed`,
+   which owns `games/`, and `issuer.seed`, the only writer of `games/` and the
+   key that signs session credentials.
+2. `games/` is a top-level namespace, so the members create it by vote:
+   `topics plan`, then `topics approve` on every member's own node.
+3. The seven game entries sit inside the publisher's namespace, so the
+   publisher alone signs them: `topics plan`, `topics sign`, `topics submit`.
+4. It writes `.yano/games/topics.json`, the public settings the pages read
+   (chain, generation, issuer key, service endpoint), and
+   `.yano/games/delegation.json` for the service.
+
+`serve.mjs` refuses every path under a dot-directory, so `.yano/` (member keys,
+API keys, the publisher's keys) is never served.
+
+A cluster from the 0.1.0-pre2 era (`.yano/` with `appchain-cluster/`) cannot
+be resumed by pre6: start a fresh one. The `duels-chain` migration notes for
+pre2 are kept in [ADD_A_CHAIN.md](ADD_A_CHAIN.md).
 
 ## Commanders: one account for every game
 
@@ -88,6 +113,83 @@ this compares certified block timestamps from both; an absent profile is
 certified absent at some height, and if that block is no older than the move,
 nothing registered later can count ([`shared/profiles.js`](shared/profiles.js)).
 
+## Session keys: the player signs every move
+
+`games-chain` is sealed with a topic registry
+([`chain/games.template.yaml`](chain/games.template.yaml)): new namespaces by
+member vote, and changes take effect two blocks after they commit.
+
+```
+games/                    owner: the publisher · writer and delegator: the issuer · credentials ≤ 1 hour
+├── games/galaxy/         2 KB moves      → games/galaxy/r<round>
+├── games/arcade/         40 KB runs      → games/arcade/f<field>
+├── games/duels/          2 KB moves      → games/duels/lobby.h<hour>, games/duels/d<duel>
+├── games/derby/          2 KB bets       → games/derby/h<hour>
+├── games/reef/           2 KB placements → games/reef/s<season>
+├── games/sonar/          4 KB moves      → games/sonar/lobby.h<hour>, games/sonar/d<battle>
+└── games/neon-rush/      40 KB rides     → games/neon-rush/s<season>
+```
+
+One registration per game is enough: a round's topic is covered by its game's
+entry and inherits its policy, so nobody registers anything when a round
+starts. The members check the policy from the committed registry, so every
+member gives the same answer, and so does a replay.
+
+**What a page does, once per game per hour** ([`shared/sessions.js`](shared/sessions.js)):
+
+1. Makes a session key: a non-extractable Ed25519 WebCrypto key, kept in
+   IndexedDB. It never leaves the browser and cannot be exported.
+2. Asks the delegation service for a credential. The request carries the
+   session public key and the game's scope, is valid for 60 seconds, has a
+   nonce, and is signed by the commander key. The service
+   ([`delegation/service.mjs`](delegation/service.mjs)) checks the signature,
+   reads the commander's profile from a member it trusts (revision 1,
+   self-signed, the same key), checks that its issuer still may delegate the
+   scope, and returns the issuer's signature over (session key, scope, one
+   hour).
+3. Signs a **session pass** with the commander key: "this session key plays
+   for nova in `games/galaxy/`". The pass travels inside every move, so every
+   browser can tell who a session key belongs to. The credential cannot: it
+   names a key, not a call sign.
+
+From then on every move is a core topic frame: the JSON move plus pass,
+signed by the session key alone. Over an hour the commander key signs two
+things, the login request and the pass, and never a move.
+
+**What the members check before storing a move** (`TopicWriteRules` in the
+host): the body is a canonical frame, the session key's signature covers this
+chain, generation, topic, payload, nonce and deadline, the credential is
+signed by a delegator of both the topic's and the scope's effective policy,
+it covers the topic and the block time, the write was not used before, and the
+payload fits the game's limit. Anything else is refused with HTTP 400 and a
+code, and never reaches the log:
+
+| Try | Refused with |
+|---|---|
+| a plain JSON move, or anyone without a session key | `TOPIC_FRAME_INVALID` |
+| a forged session signature | `TOPIC_WRITER_DENIED` |
+| a credential not from the issuer, or a Galaxy session on a Derby topic | `TOPIC_DELEGATION_INVALID` (the page's client refuses to frame it first) |
+| the same frame sent again | `TOPIC_PROOF_REPLAYED` |
+| a 50 KB Galaxy move | `TOPIC_PAYLOAD_TOO_LARGE` |
+
+**What every browser checks again** before its rules run
+([`openMove`](shared/sessions.js)), without trusting the member that served
+the bytes: every signature in the frame, that the issuer is the one this site
+publishes in `topics.json`, that the credential's scope is exactly this game,
+and that the pass is signed by the commander it names for exactly this session
+key. The rules then see the move and its author, and only ask whether the
+author is the commander the move names ([`shared/moves.js`](shared/moves.js)).
+The profile check is unchanged, and it is what ties a call sign to a key: a pass
+can claim any call sign, but only with the claimant's own key.
+
+**Proofs** show the chain of keys for any move: the session key that signed
+it, the issuer's credential for the game, and the commander's pass. Then the
+usual message proof and the root anchored on Cardano.
+
+**Sign-out** deletes the browser's session keys for that commander. A stolen
+session key works for at most the rest of its hour, and only in its own game.
+Renewing it needs a fresh login request signed by the commander key.
+
 ## Anchor Galaxy
 
 Drag from your planet to any planet (or tap one, then the target). Fleets of
@@ -102,15 +204,16 @@ blocks the page draws a copy run ahead to the present.
 
 | Rule | Why |
 |---|---|
-| A join must be signed by, and match, the commander's profile key, registered before the join | Nobody can play as you |
-| A launch must be signed by the commander, from a planet they hold at that block's time | No moving someone else's ships |
-| Nonces strictly increase; a refused move still burns its nonce | Replaying a signed move does nothing |
+| A join must come from the commander's session, match their profile key, and that profile must be registered before the join | Nobody can play as you |
+| A launch must come from the commander's session, from a planet they hold at that block's time | No moving someone else's ships |
+| The members refuse a reused write; nonces strictly increase, and a refused move still burns its nonce | Replaying a signed move does nothing |
 | At most 6 launches per commander per block; 8 commanders per round | Bounded work per block, a fair map |
 
 **Inspect** (or `i`) any planet to see which finalized move took it — the
-join or the capturing launch — and prove it: the move's signature against the
-commander's key, the `finalized-message-v1` proof at `latest-confirmed-anchor`,
-and the proven root against the Cardano anchor transaction.
+join or the capturing launch — and prove it: the session key's signature, the
+issuer's credential and the commander's pass, the `finalized-message-v1` proof
+at `latest-confirmed-anchor`, and the proven root against the Cardano anchor
+transaction.
 
 ## Anchor Arcade
 
@@ -126,7 +229,7 @@ crash costs 250. The best runs on the field race you as translucent ghosts.
    the same for everyone.
 2. **Inputs, not scores.** A run is one input byte per frame (3,600 frames,
    run-length encoded — typically a few hundred bytes to a few kilobytes) plus
-   the score you saw, signed by your commander key.
+   the score you saw, signed by your session key for `games/arcade/`.
 3. **Every browser replays.** [`arcade/js/sim.js`](arcade/js/sim.js) runs at a
    fixed 60 Hz in fixed-point integers, with a sine table baked into the
    source and a seeded xoshiro128** — no `Math.sin`, no `Math.random`. A run
@@ -179,7 +282,7 @@ round you pick Laser, Missile, Shield, EMP or Recharge (energy limits what you
 can afford) and press **Seal**.
 
 **Hidden moves without a server.** A seal is `BLAKE2b(move ‖ secret)`, signed by
-your commander key; the secret stays in your browser. When both seals are
+your session key; the secret stays in your browser. When both seals are
 final, both browsers post their reveals automatically, and every browser checks
 each reveal against its seal ([`duels/js/duels.js`](duels/js/duels.js)). Nobody
 — not even the members — can see a move before it is revealed, and nobody can
@@ -278,13 +381,6 @@ reveals rebuild their roots, both fleets are legal, and who won.
 
 ## Neon Rush
 
-Neon Rush writes canonical CBOR inside session-signed core topic frames on
-`neon-rush-chain`, under `games/neon-rush/`. The members enforce the writer
-policy, one-hour delegation, payload schema, write expiry and proof replay
-checks before storing a move. Commander signatures and replayed game rules
-remain browser checks. [Set up the service and policy](delegation/README.md)
-before playing; the issuer key stays outside both the static site and members.
-
 Two laps through a neon city at night: ↑ throttle, ↓ brake, ← → lean (touch
 buttons on phones). Bends throw you outwards with the square of your speed, so
 the tightest ones need you to ease off; tuck in a car's slipstream for a
@@ -299,7 +395,7 @@ Nobody can practise a circuit before that block exists.
 **Inputs, not times.** [`moto/js/sim.js`](moto/js/sim.js) steps the bike at a
 fixed 60 Hz in integers from one input byte per frame. A finished ride submits
 those bytes (run-length encoded — about 2 KB for two laps) and the frame it
-crossed the line, signed by the commander. Every browser replays the inputs on
+crossed the line, signed by the rider's session key. Every browser replays the inputs on
 the season's circuit; a ride counts only if it crosses the line at exactly the
 claimed frame ([`moto/js/races.js`](moto/js/races.js)).
 
@@ -320,10 +416,12 @@ whose members run [`plugin/`](plugin/): a Java port of `duels.js` packaged as
 a state-machine plugin. The page still runs `duels.js` too, but only to check
 the members' work.
 
-| | Browser edition (`orders-chain`) | Plugin edition (`duels-chain`) |
+| | Browser edition (`games-chain`) | Plugin edition (`duels-chain`) |
 |---|---|---|
 | Who runs the rules | every browser | every member; browsers check |
-| A forged, foreign or mismatched move | stored, then ignored by every browser | refused before it is stored: `BAD_SIGNATURE`, `NOT_IN_DUEL`, `REVEAL_MISMATCH`… |
+| Who signs a move | the player's session key; the members check the frame | the commander key; the plugin checks the signature |
+| A forged move | refused before it is stored: `TOPIC_WRITER_DENIED`, `TOPIC_FRAME_INVALID`… | refused before it is stored: `BAD_SIGNATURE` |
+| A legal-looking but foreign or mismatched move | stored, then ignored by every browser | refused before it is stored: `NOT_IN_DUEL`, `REVEAL_MISMATCH`… |
 | Game state | replayed from the topic in each browser | a committed record, `duel/<id>`, in the state root; `POST …/query/duel` |
 | Proving a result | prove every move, recompute every round | one state proof of the record against the anchored root |
 | Who owns a call sign | the profile on `authenticated-map-chain` (a cross-chain check) | the first key to use it on `duels-chain`: a machine sees only its own chain |
@@ -357,18 +455,29 @@ agree on all of it (see [plugin/README.md](plugin/README.md)).
 
 1. Create a folder with an `index.html` that links `../shared/base.css` and a
    module that imports from `../../shared/`: `Ledger`, `Session` (sign-in and
-   the commander), `ProofPanel`, and `proveProfile` / `typedProof`.
-2. Pick an `app` id and topics on `orders-chain`, and write the game as a
-   deterministic fold over finalized messages — integer maths, no clock, no
-   unseeded randomness — with tests in `test/run.mjs`.
-3. Add an entry to `GAMES` in [`shared/config.js`](shared/config.js) and a
+   the commander), `connectMoves` (session-signed reads and writes),
+   `ProofPanel`, and `proveProfile` / `typedProof` / `authorshipChecks`.
+2. Give it an entry in `TOPIC_ENTRIES` in [`shared/config.js`](shared/config.js)
+   (`games/<game>/` and its payload limit) and set `sessions: true` and `scope`
+   in its config. `./cluster start` registers the entry, signed by the
+   publisher, and the delegation service starts issuing credentials for it.
+3. Write the game as a deterministic fold over finalized messages: integer
+   maths, no clock, no unseeded randomness. Read moves with `moveBody` and
+   check authors with `authentic` ([`shared/moves.js`](shared/moves.js)). Add
+   tests in `test/run.mjs`.
+4. Add an entry to `GAMES` in [`shared/config.js`](shared/config.js) and a
    preview in [`hub.js`](hub.js).
 
 ## What it does not guarantee
 
-- **The ledger does not enforce game rules — except first-come in Land Rush
-  and the duels' plugin edition.** `ordered-log` accepts any move. Invalid ones
-  are ignored by every browser identically, but still stored. In Land Rush the
+- **The ledger enforces who writes, not the game rules — except first-come in
+  Land Rush and the duels' plugin edition.** The topic policy guarantees that
+  every stored move comes from a player's session under the publisher's
+  credential, so forged, replayed and anonymous moves never reach the log. But
+  `ordered-log` does not read a move: a player's own illegal move is ignored
+  by every browser identically, but still stored. A topic schema could
+  also make the members refuse malformed payloads; these games keep JSON
+  payloads and no schema. In Land Rush the
   ledger refuses double claims, but a cheater's invalid claim still occupies
   (scorches) a tile. The plugin edition shows the alternative: the members run
   the rules, at the price of trusted code on every member.
@@ -402,17 +511,40 @@ agree on all of it (see [plugin/README.md](plugin/README.md)).
   profile for that long would diverge — a gap a game plugin would close.
 - **Two devices, one commander.** Nonces come from each device's clock; a
   device whose clock is far behind will have its moves refused as stale.
+- **The delegation service is the publisher's gate.** It checks a commander's
+  profile and signature before it issues a credential, but whoever holds the
+  issuer key can authorize any session key. The members only enforce that some
+  credential from the issuer covers the write; browsers add the session pass,
+  which ties a session key to a commander, and the profile check, which ties
+  the commander to a call sign. The reference service keeps its replay cache in
+  memory, for one instance; a replicated service needs a shared store.
+- **A session key is good for its hour.** Sign-out deletes it from the
+  browser, but a copied credential and key stay usable until the credential
+  expires. The owners can revoke one sooner with a `revoke` registry command
+  (`yano.sh appchain topics`), and the members then refuse it in the next block.
+- **Only signed-in players post markers.** A season's or field's opening
+  message, and Derby's beacon `go`, are writes like any other, so they need a
+  session; spectators can watch but not open a round.
 
 ## Tests
 
 ```bash
-npm test                                          # 66 game checks + service/session/bootstrap tests; no Yano cluster
+npm test                                          # 74 checks, no cluster needed
 node --no-warnings test/duel-vectors.mjs          # rewrite the browser rules' duel vectors for the plugin
 (cd plugin && ./gradlew test)                     # the plugin agrees with them (6 tests)
 ```
 
 The authenticated-map envelope is checked byte for byte against the release
-CLI. The rest cover the keystore; Galaxy's simulation (map determinism,
+CLI. The session keys are tested with real frames from the release's topic
+client: a move opens with its author, while a tampered payload, a plain or
+direct write, a foreign issuer, a credential for the whole namespace or
+another game, a pass signed by someone else and a pass copied to another
+session do not. The delegation service issues a one-hour, one-game credential
+for a fresh request from the profile's key, and refuses replayed, forged,
+borrowed, stale, unknown, out-of-scope and inactive-issuer requests. A page's
+`Moves` signs one login and one pass, then frames every move with the session
+key, and the frames open and apply in Galaxy. Every session game writes under
+its own registered entry. The rest cover the keystore; Galaxy's simulation (map determinism,
 production, arrivals, captures, forged and replayed moves, the cross-chain
 profile check, round boundaries, the per-block cap, two replays reaching the
 same winner); and the Arcade (the sine table, input encoding, identical
@@ -442,16 +574,18 @@ refused, live splits, replayed and wrong-circuit rides).
 ```
 index.html, hub.js, hub.css   the game center: sign in once, pick a game
 shared/                       what every game uses
-  config.js                   members, chains, accounts, the list of games
+  config.js                   members, chains, accounts, the games/ registry entries, the list of games
   auth.js                     the sign-in panel and the commander session
+  sessions.js                 session keys: credentials, passes, openMove (verify a move), Moves (read and write)
+  moves.js                    what a game's rules use: moveBody and authentic
+  topic-client/               the release's browser topic client (frames, credentials), copied unchanged
   accounts.js                 PBKDF2 + AES-GCM keystore, profiles
   profiles.js                 profile lookup, registration, the cross-chain check
-  proofs.js                   typed proofs, profile proofs, the anchored-root check
+  proofs.js                   typed proofs, profile proofs, authorship (session, credential, pass), the anchored root
   ledger.js                   REST client: by-topic, blocks, submit, SSE, plugin routes
   authmap.js                  PUT_IF_ABSENT bytes and entry decoding
   ui.js, base.css             proof panel, toasts, shared styles
   cbor.js, blake2b.js, crypto.js, rng.js
-  neon-auth.js, topic-client/  bound login requests and verified, vendored topic SDK modules
 galaxy/                       Anchor Galaxy: galaxy.js (the simulation), render.js, app.js, proofs.js
 arcade/                       Anchor Arcade: sim.js (the shooter), runs.js (fields, replay
                               verification, leaderboard), render.js (rockets), app.js, proofs.js
@@ -469,12 +603,11 @@ moto/                         Neon Rush: sim.js (the bike, traffic and circuit g
                               splits, leaderboard), render.js (the pseudo-3D city), app.js, proofs.js
 sonar/                        Deep Sonar: sonar.js (fleet commitments, Merkle answers, lobby, battle),
                               render.js (your sea and the sonar screen), app.js, proofs.js (shot and battle proofs)
-serve.mjs                     static server + same-origin proxy for local play
-delegation/                   external key-file service, fresh-chain bootstrap, ride schema, operator runbook
-cluster, chain/               local four-chain configuration (Neon topics use a fresh chain)
-ADD_A_CHAIN.md                adding duels-chain to a running cluster: local, and the showcase procedure
+delegation/                   the game publisher's side: service.mjs (who gets a credential), server.mjs
+                              (POST /delegations), setup.mjs (registers games/ and the game entries)
+serve.mjs                     static server + same-origin proxy; --local adds the delegation service
+cluster, chain/               the local application: games.template.yaml, sealed and run with yano.sh appchain
+ADD_A_CHAIN.md                historical (0.1.0-pre2): how duels-chain joined a running pre2 cluster
 test/run.mjs                  npm test
 test/duel-vectors.mjs         the shared duel vectors for the plugin's tests
-test/topics/                  session/service/path/bootstrap tests and isolated three-node V4 driver
-scripts/check-topic-client.mjs  vendored SDK digest and optional explicit source comparison
 ```

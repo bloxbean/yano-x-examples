@@ -32,6 +32,32 @@ export function typedProof(ledger, chain, subject, coordinates, view, claim) {
   });
 }
 
+const short = (key) => `${key.slice(0, 8)}…`;
+const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+/**
+ * Who wrote a session move, checked here from the message's own bytes (shared/sessions.js,
+ * openMove): the session key's signature, the issuer's credential for this game's scope, and
+ * the commander's pass for that session key. Returns { checks, body, author }.
+ * For a signed game (no sessions) `legacy` checks the commander's signature instead.
+ */
+export async function authorshipChecks(moves, message, expectId, expectPub, legacy) {
+  if (!moves.cfg.sessions) return { checks: [await legacy()], body: null, author: null };
+  const opened = await moves.open(message);
+  const a = opened.author;
+  if (!a) return { checks: [{ ok: false, text: `the move does not open: ${opened.refusal}` }], body: null, author: null };
+  return {
+    body: opened.body,
+    author: a,
+    checks: [
+      { ok: true, text: `signed by session key ${short(a.session)} — a non-extractable key that never left the player’s browser` },
+      { ok: true, text: `the game publisher’s issuer ${short(a.issuer)} delegated that key for ${moves.cfg.scope}, until ${clock(a.until)}; every member checked it before storing the move` },
+      { ok: a.id === expectId && a.pub === expectPub,
+        text: `${a.id}’s commander key ${short(a.pub)} signed the session pass that binds the key to ${a.id}` },
+    ],
+  };
+}
+
 /** Common checks: finality certificate and, when sealed, the anchored root. */
 export function rootChecks(proof, anchor, sealed, threshold) {
   const sigs = proof.proof?.finalityCertificate?.signatures?.length ?? 0;

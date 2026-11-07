@@ -1,42 +1,56 @@
 #!/usr/bin/env node
+// The delegation service over HTTP: POST /delegations, JSON in and out.
+//
+//   node delegation/server.mjs --config .yano/games/delegation.json
+//
+// ./cluster start writes that configuration for the local cluster, and
+// `node serve.mjs --local` starts this service beside the site. A hosted game
+// runs it on its own HTTPS endpoint with an explicit origin allowlist; the
+// static site never holds the issuer key, and neither do the members.
+//
+// The configuration is public apart from keyFile, the path of the issuer's
+// 32-byte Ed25519 seed (64 hex characters): an owner-only regular file outside
+// the static site.
+
 import http from 'node:http';
 import { readFile, lstat, realpath } from 'node:fs/promises';
 import { createPrivateKey, createPublicKey } from 'node:crypto';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ACCOUNTS } from '../shared/config.js';
 import { profileKey } from '../shared/accounts.js';
 import { decodeEntry } from '../shared/authmap.js';
-import { NEON_SCOPE, SESSION_MS } from '../shared/neon-auth.js';
-import { hex, unhex, signerFromKey } from '../shared/topic-client/topics.mjs';
+import { SESSION_MS } from '../shared/sessions.js';
+import { hex, signerFromKey, unhex } from '../shared/topic-client/topics.mjs';
 import { createDelegationService, DelegationError } from './service.mjs';
 
 const STATIC_ROOT = fileURLToPath(new URL('../', import.meta.url));
 const LIMIT = 16384;
 
+/** The issuer's signer, from an owner-only seed file outside the static site. */
 export async function loadIssuer(file) {
   const info = await lstat(file);
   const canonical = await realpath(file);
-  if (!info.isFile() || info.isSymbolicLink() || canonical.startsWith(STATIC_ROOT)
-      || process.platform !== 'win32' && (info.mode & 0o077) !== 0 || info.size > 66) {
-    throw new Error('issuer key must be an owner-only regular file outside the static site');
+  const insideSite = canonical.startsWith(STATIC_ROOT) && !canonical.startsWith(resolve(STATIC_ROOT, '.yano'));
+  if (!info.isFile() || info.isSymbolicLink() || insideSite
+      || (process.platform !== 'win32' && (info.mode & 0o077) !== 0) || info.size > 66) {
+    throw new Error('the issuer key must be an owner-only regular file outside the served files');
   }
   const encoded = await readFile(canonical);
-  let seed;
+  const seed = unhex(encoded.toString('ascii').trim(), 32);
+  const der = Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]);
   try {
-    const value = encoded.toString('ascii').trim();
-    seed = unhex(value, 32);
-    const der = Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]);
-    try {
-      const privateKey = await crypto.subtle.importKey('pkcs8', der, 'Ed25519', false, ['sign']);
-      const nodeKey = createPrivateKey({ key: der, format: 'der', type: 'pkcs8' });
-      const publicKey = createPublicKey(nodeKey).export({ format: 'jwk' }).x;
-      return signerFromKey({ privateKey, publicKey: Buffer.from(publicKey, 'base64url').toString('hex') });
-    } finally { der.fill(0); }
-  } finally { encoded.fill(0); seed?.fill(0); }
+    const privateKey = await crypto.subtle.importKey('pkcs8', der, 'Ed25519', false, ['sign']);
+    const publicKey = createPublicKey(createPrivateKey({ key: der, format: 'der', type: 'pkcs8' })).export({ format: 'jwk' }).x;
+    return signerFromKey({ privateKey, publicKey: Buffer.from(publicKey, 'base64url').toString('hex') });
+  } finally {
+    der.fill(0);
+    encoded.fill(0);
+    seed.fill(0);
+  }
 }
 
-export function createHttpServer(service, { origins = ['http://localhost:8787'], maxConcurrent = 32 } = {}) {
+export function createHttpServer(service, { origins = [], maxConcurrent = 32 } = {}) {
   let active = 0;
   const allowed = new Set(origins);
   const server = http.createServer(async (req, res) => {
@@ -59,7 +73,8 @@ export function createHttpServer(service, { origins = ['http://localhost:8787'],
     if (active >= maxConcurrent) return respond(503, { code: 'DELEGATION_SERVICE_BUSY' });
     active++;
     try {
-      let size = 0; const chunks = [];
+      let size = 0;
+      const chunks = [];
       for await (const chunk of req) {
         size += chunk.length;
         if (size > LIMIT) return respond(413, { code: 'DELEGATION_REQUEST_TOO_LARGE' });
@@ -68,32 +83,40 @@ export function createHttpServer(service, { origins = ['http://localhost:8787'],
       let request;
       try { request = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks))); }
       catch { return respond(400, { code: 'DELEGATION_REQUEST_INVALID' }); }
-      respond(200, await service(request));
+      const result = await service(request);
+      console.log(`  issued a session credential: ${request.id} · ${request.scope} · key ${request.session.slice(0, 8)}…`);
+      respond(200, result);
     } catch (error) {
-      respond(error instanceof DelegationError ? error.status : 503,
-        { code: error instanceof DelegationError ? error.code : 'DELEGATION_SERVICE_UNAVAILABLE' });
-    } finally { active--; }
+      if (error instanceof DelegationError) {
+        console.log(`  refused a credential: ${error.code}`);
+        respond(error.status, { code: error.code });
+      } else {
+        console.log(`  delegation service error: ${error.message}`);
+        respond(503, { code: 'DELEGATION_SERVICE_UNAVAILABLE' });
+      }
+    } finally {
+      active--;
+    }
   });
-  server.requestTimeout = 15000; server.headersTimeout = 10000;
-  server.maxRequestsPerSocket = 100;
+  server.requestTimeout = 15000;
+  server.headersTimeout = 10000;
   return server;
 }
 
 async function boundedJson(url, request = globalThis.fetch) {
   const response = await request(url, { redirect: 'error', signal: AbortSignal.timeout(3000),
     headers: { Accept: 'application/json' } });
-  if (!response.ok) throw new Error('trusted profile peer unavailable');
-  const reader = response.body.getReader(); let size = 0; const chunks = [];
-  try {
-    for (;;) {
-      const { done, value } = await reader.read(); if (done) break;
-      size += value.length; if (size > 131072) throw new Error('peer response too large');
-      chunks.push(value);
-    }
-  } finally { await reader.cancel(); reader.releaseLock(); }
-  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`trusted member answered ${response.status}`);
+  const text = await response.text();
+  if (text.length > 262144) throw new Error('member response too large');
+  return JSON.parse(text);
 }
 
+/**
+ * Reads from the one member the operator trusts: commander profiles, and whether
+ * the issuer may still delegate a scope. Never from anything in a request.
+ */
 export function trustedPeerReaders(config, issuer, { fetch: request = globalThis.fetch } = {}) {
   unhex(config.profileGenerationId, 32);
   const peer = new URL(config.peer);
@@ -101,59 +124,66 @@ export function trustedPeerReaders(config, issuer, { fetch: request = globalThis
     throw new Error('invalid trusted peer');
   }
   const base = config.peer.replace(/\/$/, '');
-  const chain = `/api/v1/app-chain/chains/${encodeURIComponent(config.chainId)}`;
-  const profileStatus = base + `/api/v1/app-chain/chains/${encodeURIComponent(ACCOUNTS.profilesChain)}/status`;
-  const checkProfileIdentity = status => {
-    if (status.chainId !== ACCOUNTS.profilesChain || status.stateCommitment?.generationId !== config.profileGenerationId
-        || !Number.isSafeInteger(status.stateCommitment?.version) || status.stateCommitment.version < 1) {
+  const chainPath = (chain) => `${base}/api/v1/app-chain/chains/${encodeURIComponent(chain)}`;
+  const profileGeneration = async () => {
+    const status = await boundedJson(`${chainPath(ACCOUNTS.profilesChain)}/status`, request);
+    if (status.chainId !== ACCOUNTS.profilesChain || status.stateCommitment?.generationId !== config.profileGenerationId) {
       throw new DelegationError('DELEGATION_PROFILE_GENERATION_MISMATCH', 409);
     }
     return status.stateCommitment.version;
   };
   return {
-    lookupProfile: async id => {
-      const before = checkProfileIdentity(await boundedJson(profileStatus, request));
-      const path = '/api/v1/plugins/org.yanoproject.x.stdlib/authenticated-map/entries/'
+    lookupProfile: async (id) => {
+      const before = await profileGeneration();
+      const record = await boundedJson(`${base}/api/v1/plugins/org.yanoproject.x.stdlib/authenticated-map/entries/`
         + `${encodeURIComponent(ACCOUNTS.profilesCollection)}/${hex(profileKey(ACCOUNTS, id))}`
-        + `?chain=${encodeURIComponent(ACCOUNTS.profilesChain)}`;
-      const record = await boundedJson(base + path, request);
-      const after = checkProfileIdentity(await boundedJson(profileStatus, request));
-      if (record.chainId !== ACCOUNTS.profilesChain || record.committedHeight < before || record.committedHeight > after) {
+        + `?chain=${encodeURIComponent(ACCOUNTS.profilesChain)}`, request);
+      const after = await profileGeneration();
+      if (record && (record.committedHeight < before || record.committedHeight > after)) {
         throw new DelegationError('DELEGATION_PROFILE_GENERATION_MISMATCH', 409);
       }
       return decodeEntry(record);
     },
-    checkAuthority: async () => {
-      const status = await boundedJson(base + chain + '/status', request);
-      const resolved = await boundedJson(base + chain + `/topics/resolve?topic=${encodeURIComponent(NEON_SCOPE)}`, request);
-      const outcome = resolved.outcome;
-      return status.chainId === config.chainId && status.stateCommitment?.generationId === config.generationId
-        && outcome?.kind === 'POLICY' && !outcome.policy.retired && outcome.policy.writers?.keys !== null
-        && outcome.policy.delegate?.includes(issuer.publicKey) && outcome.policy.maxDelegationMs >= SESSION_MS;
+    checkAuthority: async (scope) => {
+      const status = await boundedJson(`${chainPath(config.chainId)}/status`, request);
+      const resolved = await boundedJson(`${chainPath(config.chainId)}/topics/resolve?topic=${encodeURIComponent(scope)}`, request);
+      const policy = resolved.outcome?.kind === 'POLICY' ? resolved.outcome.policy : null;
+      return status.stateCommitment?.generationId === config.generationId && !!policy && !policy.retired
+        && policy.delegate?.includes(issuer.publicKey) && policy.maxDelegationMs >= SESSION_MS;
     },
   };
 }
 
-async function main() {
-  const args = process.argv.slice(2);
-  if (args.length !== 4 || args[0] !== '--config' || args[2] !== '--key-file') {
-    throw new Error('Usage: node delegation/server.mjs --config service.json --key-file /outside/site/issuer.seed');
-  }
-  const configBytes = await readFile(resolve(args[1]));
-  if (configBytes.length > LIMIT) throw new Error('configuration exceeds bound');
-  const config = JSON.parse(configBytes.toString('utf8'));
+/** Start the service from a configuration file; resolves to the listening server. */
+export async function startDelegationServer(configPath, { keyFile, log = true } = {}) {
+  const bytes = await readFile(resolve(configPath));
+  if (bytes.length > LIMIT) throw new Error('the configuration is too large');
+  const config = JSON.parse(bytes.toString('utf8'));
   if (!Number.isSafeInteger(config.port) || config.port < 1 || config.port > 65535
-      || !Array.isArray(config.origins) || config.origins.some(origin => new URL(origin).origin !== origin)) {
-    throw new Error('invalid server port or allowed origins');
+      || !Array.isArray(config.origins) || config.origins.some((origin) => new URL(origin).origin !== origin)) {
+    throw new Error('invalid port or allowed origins');
   }
-  const issuer = await loadIssuer(resolve(args[3]));
-  if (issuer.publicKey !== config.issuerPublicKey) throw new Error('issuer does not match pinned public key');
+  const issuer = await loadIssuer(resolve(dirname(resolve(configPath)), keyFile ?? config.keyFile));
+  if (issuer.publicKey !== config.issuerPublicKey) throw new Error('the issuer key does not match issuerPublicKey');
   const service = createDelegationService({ ...config, issuer, ...trustedPeerReaders(config, issuer) });
   const server = createHttpServer(service, config);
-  server.listen(config.port, '127.0.0.1', () => console.log(`Delegation service on 127.0.0.1:${config.port}`));
-  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => server.close());
+  await new Promise((done) => server.listen(config.port, '127.0.0.1', done));
+  if (log) console.log(`Delegation service on http://127.0.0.1:${config.port}/delegations (issuer ${issuer.publicKey.slice(0, 16)}…)`);
+  return server;
 }
+
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  main().catch(() => { console.error('Delegation service could not start. Check configuration and private-key file.');
-    process.exitCode = 1; });
+  const args = process.argv.slice(2);
+  const option = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
+  const config = option('--config');
+  if (!config) {
+    console.error('Usage: node delegation/server.mjs --config <service.json> [--key-file <issuer seed file>]');
+    process.exit(2);
+  }
+  startDelegationServer(config, { keyFile: option('--key-file') }).then((server) => {
+    for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => server.close());
+  }).catch((error) => {
+    console.error(`The delegation service could not start: ${error.message}`);
+    process.exitCode = 1;
+  });
 }

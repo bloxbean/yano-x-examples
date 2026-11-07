@@ -9,26 +9,31 @@
 // past a deadline (a "forfeit" claim, or anything else) settles a missed seal
 // or reveal identically in every browser.
 //
-// Lobby topic (one per hour):
-//   challenge {"t":"challenge","id","pub","n","rounds","sig"}       its message id is the duel id
-//   accept    {"t":"accept","id","pub","n","challenge","sig"}       the first valid accept wins
-// Duel topic (one per duel):
-//   seal      {"t":"seal","id","round","hash","sig"}
-//   reveal    {"t":"reveal","id","round","move","secret","sig"}
-//   forfeit   {"t":"forfeit","id","round","sig"}                   only advances block time
+// Lobby topic (one per hour, <base>lobby.h<hour>):
+//   challenge {"t":"challenge","id","pub","n","rounds"}       its message id is the duel id
+//   accept    {"t":"accept","id","pub","n","challenge"}       the first valid accept wins
+// Duel topic (one per duel, <base>d<duel id prefix>):
+//   seal      {"t":"seal","id","round","hash"}
+//   reveal    {"t":"reveal","id","round","move","secret"}
+//   forfeit   {"t":"forfeit","id","round"}                   only advances block time
+//
+// Two editions (config.js). The browser edition plays on games-chain under
+// games/duels/, every message signed by the player's session key. The plugin
+// edition plays on duels-chain, where each message also carries `sig`, the
+// commander's own signature over statement(...), which the members' plugin
+// checks before storing it. shared/moves.js reads both.
 
 import { blake2b } from '../../shared/blake2b.js';
-import { ed25519Verify, fromHex, toHex, utf8 } from '../../shared/crypto.js';
+import { toHex, utf8 } from '../../shared/crypto.js';
+import { authentic, moveBody, signatureShape } from '../../shared/moves.js';
 
 const CALLSIGN = /^[a-z0-9][a-z0-9_-]{2,19}$/;
 const HEX32 = /^[0-9a-f]{32}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
-const HEX128 = /^[0-9a-f]{128}$/;
 
-const base = (cfg) => cfg.app.replace('/', '.');
 export const lobbyOf = (cfg, ts) => Math.floor(ts / cfg.lobbyMs);
-export const lobbyTopic = (cfg, hour) => `${base(cfg)}.lobby.h${hour}`;
-export const duelTopic = (cfg, duelId) => `${base(cfg)}.d${duelId.slice(0, 16)}`;
+export const lobbyTopic = (cfg, hour) => `${cfg.topicBase}lobby.h${hour}`;
+export const duelTopic = (cfg, duelId) => `${cfg.topicBase}d${duelId.slice(0, 16)}`;
 export const statement = (cfg, scope, kind, id, ...fields) => [cfg.app, cfg.movesChain, scope, kind, id, ...fields].join('|');
 export const sealHash = (cfg, duelId, round, id, move, secret) =>
   toHex(blake2b(utf8([cfg.app, duelId, round, id, move, secret].join('|')), 32));
@@ -72,8 +77,7 @@ export class Lobby {
     if (height < this.position.height || (height === this.position.height && index <= this.position.index)) {
       return { skipped: true };
     }
-    let b;
-    try { b = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(fromHex(entry.bodyHex))); } catch { b = null; }
+    const b = moveBody(this.cfg, entry);
     let result = reject('not a lobby message');
     if (b && (b.t === 'challenge' || b.t === 'accept')) result = await this.#message(entry, b, profiles);
     this.position = { height, index };
@@ -83,11 +87,11 @@ export class Lobby {
   async #message(entry, b, profiles) {
     const { cfg } = this;
     if (typeof b.id !== 'string' || !CALLSIGN.test(b.id) || typeof b.pub !== 'string' || !HEX64.test(b.pub)
-        || !Number.isSafeInteger(b.n) || b.n < 1 || typeof b.sig !== 'string' || !HEX128.test(b.sig)) {
+        || !Number.isSafeInteger(b.n) || b.n < 1 || !signatureShape(cfg, b)) {
       return reject('malformed');
     }
     const fields = b.t === 'challenge' ? [b.n, b.rounds] : [b.n, b.challenge];
-    if (!(await ed25519Verify(fromHex(b.pub), fromHex(b.sig), utf8(statement(cfg, 'lobby', b.t, b.id, ...fields))))) {
+    if (!(await authentic(cfg, entry, b, b.pub, statement(cfg, 'lobby', b.t, b.id, ...fields)))) {
       return reject('signature does not verify');
     }
     if (b.n <= (this.nonces.get(b.id) ?? 0)) return reject('stale nonce (replayed)');
@@ -172,20 +176,19 @@ export class Duel {
     }
     const before = this.history.length;
     this.#expire(timestamp);
-    let b;
-    try { b = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(fromHex(entry.bodyHex))); } catch { b = null; }
+    const b = moveBody(this.cfg, entry);
     const result = await this.#message(entry, b);
     return { ...result, settled: this.history.slice(before) };
   }
 
   async #message(entry, b) {
     const { cfg } = this;
-    if (!b || typeof b.id !== 'string' || typeof b.sig !== 'string' || !HEX128.test(b.sig)) return reject('malformed');
+    if (!b || typeof b.id !== 'string' || !signatureShape(cfg, b)) return reject('malformed');
     const i = this.seat(b.id);
     if (i < 0) return reject('not in this duel');
     if (this.done) return reject('the duel is over');
-    const pub = fromHex(this.players[i].pub);
-    const verify = (kind, ...fields) => ed25519Verify(pub, fromHex(b.sig), utf8(statement(cfg, this.duelId, kind, b.id, ...fields)));
+    const pub = this.players[i].pub;
+    const verify = (kind, ...fields) => authentic(cfg, entry, b, pub, statement(cfg, this.duelId, kind, b.id, ...fields));
 
     if (b.t === 'forfeit') {
       if (!(await verify('forfeit', b.round))) return reject('signature does not verify');

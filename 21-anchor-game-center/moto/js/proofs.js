@@ -1,25 +1,23 @@
-// Proving a run: the circuit comes from the season's first block, the rider
-// signed exactly these inputs and this time, the inputs replay to that time in
+// Proving a run: the circuit comes from the season's first block, the rider's
+// session key signed exactly these inputs and this time, the inputs replay to that time in
 // this browser, and the run sits under the root anchored on Cardano.
 
-import { decodeMove } from './topic-session.js';
-import { ed25519Verify, fromHex, utf8 } from '../../shared/crypto.js';
-import { MESSAGE_SUBJECT, rootChecks, typedProof } from '../../shared/proofs.js';
+import { fromHex } from '../../shared/crypto.js';
+import { MESSAGE_SUBJECT, authorshipChecks, rootChecks, typedProof } from '../../shared/proofs.js';
 import { decodeInputs } from '../../arcade/js/runs.js';
 import { lapTime, replay } from './sim.js';
-import { circuitSeed, inputsHash, runStatement, seasonTopic } from './races.js';
+import { circuitSeed, seasonTopic } from './races.js';
 
-export async function proveRun(cfg, ledger, circuit, run, { threshold } = {}) {
+export async function proveRun(cfg, ledger, moves, circuit, run, { threshold } = {}) {
   const message = await ledger.message(cfg.movesChain, run.messageId);
   if (!message) return { checks: [{ ok: false, text: 'the run is not visible on this member' }] };
-  const body = await decodeMove(cfg, seasonTopic(cfg, circuit.season), message.bodyHex);
-  const encoded = body ? fromHex(body.inputs) : new Uint8Array(0);
-  const signed = !!body && await ed25519Verify(fromHex(run.pub), fromHex(body.sig),
-    utf8(runStatement(cfg, circuit.season, body.seed, body.id, body.n, inputsHash(encoded), body.frames)));
+  const { checks: signed, body } = await authorshipChecks(moves, message, run.id, run.pub);
+  let encoded = new Uint8Array(0);
+  try { encoded = fromHex(body?.inputs ?? ''); } catch { /* checked below */ }
   const opening = await ledger.block(cfg.movesChain, circuit.seededBy.height);
   const seedOk = !!opening && circuitSeed(cfg, circuit.season, opening.stateRoot) === circuit.seed;
   let replayed = null;
-  try { replayed = replay(circuit.track, decodeInputs(encoded, body.frames)).finished; } catch { /* stays null */ }
+  try { replayed = replay(circuit.track, decodeInputs(encoded, body?.frames)).finished; } catch { /* stays null */ }
 
   const anchor = await ledger.anchor(cfg.movesChain);
   const sealed = !!anchor && run.height <= anchor.anchoredHeight;
@@ -29,8 +27,8 @@ export async function proveRun(cfg, ledger, circuit, run, { threshold } = {}) {
   const f = proof.fact?.fields ?? {};
   const checks = [
     { ok: seedOk, text: `the circuit comes from block #${circuit.seededBy.height}’s state root — nobody could ride it before that block` },
-    { ok: !!body, text: 'the original message retains its session-signed topic frame and canonical payload' },
-    { ok: signed, text: `${run.id} signed these ${body?.frames?.toLocaleString()} frames of inputs (${encoded.length.toLocaleString()} bytes) and the time ${lapTime(run.frames)}` },
+    ...signed,
+    { ok: body?.frames === run.frames, text: `the signed move holds ${body?.frames?.toLocaleString() ?? '—'} frames of inputs (${encoded.length.toLocaleString()} bytes) and claims the time ${lapTime(run.frames)}` },
     { ok: replayed === run.frames, text: `replayed here: the inputs cross the line at frame ${replayed ?? '—'} = ${replayed ? lapTime(replayed) : '—'}` },
     { ok: proof.claimResult?.satisfied === true, text: proof.claimResult?.explanation ?? 'claim not evaluated' },
     { ok: f.height === run.height && f.index === run.index && f.topic === seasonTopic(cfg, circuit.season),

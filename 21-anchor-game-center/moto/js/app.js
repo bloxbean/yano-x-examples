@@ -4,10 +4,9 @@
 // the fastest rides, submits finished rides and keeps the leaderboard in step
 // with the ledger.
 
-import { loadTopicConfiguration, NeonTopicSession } from './topic-session.js';
 import { CONFIG } from './config.js';
 import { BRAKE, CHECKPOINTS, FPS, LAP, LAPS, LEFT, MAX_FRAMES, RIGHT, Run, THROTTLE, Track, autopilot, lapTime } from './sim.js';
-import { Circuit, inputsHash, runStatement, seasonOf, seasonTopic, splitStatement } from './races.js';
+import { Circuit, seasonOf, seasonTopic } from './races.js';
 import { Renderer } from './render.js';
 import { proveRun } from './proofs.js';
 import { encodeInputs } from '../../arcade/js/runs.js';
@@ -17,19 +16,13 @@ import { Session } from '../../shared/auth.js';
 import { ProofPanel, esc, reportReachability, toast, txLink } from '../../shared/ui.js';
 import { blake2b } from '../../shared/blake2b.js';
 import { ed25519Supported, toHex, utf8 } from '../../shared/crypto.js';
+import { connectMoves, showSession } from '../../shared/sessions.js';
 
 const $ = (id) => document.getElementById(id);
 const proxy = await applyProxy();
 const ledger = new Ledger(CONFIG, { proxy });
 const session = new Session(ledger);
-let topicSession = null;
-let topicSetupError = null;
-try { topicSession = new NeonTopicSession(await loadTopicConfiguration(CONFIG)); }
-catch (error) { topicSetupError = error.message; }
-const submitMove = (season, body) => {
-  if (!topicSession) throw new Error(topicSetupError);
-  return topicSession.submit(ledger, session.relay, session.commander, seasonTopic(CONFIG, season), body);
-};
+const moves = await connectMoves(ledger, CONFIG, session, () => renderSide());
 const panel = new ProofPanel();
 const renderer = new Renderer($('road'));
 $('back').href = withQuery('../');
@@ -84,7 +77,7 @@ async function sync() {
     do {
       again = false;
       const c = circuit;
-      const entries = await ledger.entriesFrom(CONFIG.movesChain, seasonTopic(CONFIG, c.season), c.position.height);
+      const entries = await moves.entries(seasonTopic(CONFIG, c.season), c.position.height);
       for (const entry of entries) {
         if (c !== circuit) return;
         let result;
@@ -131,14 +124,13 @@ function restartAttract() {
 async function play() {
   const c = session.commander;
   if (!c) { session.open(); return; }
-  if (!topicSession) { toast(topicSetupError, 'info'); return; }
   if (circuit.end - Date.now() < 160_000) { toast('This season ends too soon for a full ride — wait for the next circuit', 'info'); return; }
   if (!circuit.seed) {
     if (ui.opening) return;
     ui.opening = true;
     $('prompt-note').textContent = 'Opening the season — the circuit comes from the block that finalizes this…';
     try {
-      await submitMove(circuit.season, { t: 'open' });
+      await moves.submit(c, session.relay, seasonTopic(CONFIG, circuit.season), { t: 'open' });
       for (let i = 0; i < 60 && !circuit.seed; i++) { await new Promise((r) => setTimeout(r, 250)); await sync(); }
     } catch (error) {
       toast(`Could not open the season: ${error.message}`, 'info');
@@ -224,9 +216,8 @@ function onSplit(count) {
   if (count >= LAPS * CHECKPOINTS) return; // the finish is the run itself
   const c = session.commander;
   const n = nextNonce();
-  c.sign(splitStatement(CONFIG, ui.playSeason, c.id, n, ui.rideId, count, frame)).then((sig) =>
-    submitMove(ui.playSeason, { t: 'split', id: c.id, pub: c.pub, n, run: ui.rideId, cp: count, frame, sig }))
-    .catch(() => {});
+  moves.submit(c, session.relay, seasonTopic(CONFIG, ui.playSeason),
+    { t: 'split', id: c.id, pub: c.pub, n, run: ui.rideId, cp: count, frame }).catch(() => {});
 }
 
 /** Where a live rival probably is now, from their last signed split. */
@@ -271,7 +262,7 @@ async function finish() {
   const encoded = encodeInputs(frames);
   const steps = [
     { title: 'Inputs recorded', sub: `${frames.length.toLocaleString()} frames · ${encoded.length.toLocaleString()} bytes`, ms: '' },
-    { title: 'Signed by your rider session and commander', sub: `Ed25519 · ${c.id}`, ms: '' },
+    { title: 'Signed with your session key', sub: `Ed25519 · ${CONFIG.scope} · ${c.id}`, ms: '' },
     { title: `Finalized on ${CONFIG.movesChain}`, sub: 'waiting for the members…', ms: '' },
     { title: 'Replayed by this browser', sub: 'the time must come out of your inputs', ms: '' },
     { title: 'Sealed on Cardano', sub: 'at the next anchor', ms: '' },
@@ -292,13 +283,12 @@ async function finish() {
   try {
     const t0 = performance.now();
     const n = nextNonce();
-    const sig = await c.sign(runStatement(CONFIG, ui.playSeason, ui.playSeed, c.id, n, inputsHash(encoded), run.finished));
-    steps[1].ms = `${Math.max(1, Math.round(performance.now() - t0))} ms`;
-    at = 2; draw();
-    const body = { t: 'run', id: c.id, pub: c.pub, n, seed: ui.playSeed, inputs: toHex(encoded), frames: run.finished, sig };
-    const submitted = performance.now();
+    const move = { t: 'run', id: c.id, pub: c.pub, n, seed: ui.playSeed, inputs: toHex(encoded), frames: run.finished };
     const outcome = new Promise((resolve) => { ui.pendingRun = { resolve }; });
-    const { messageId } = await submitMove(ui.playSeason, body);
+    const submitted = performance.now();
+    const { messageId } = await moves.submit(c, session.relay, seasonTopic(CONFIG, ui.playSeason), move);
+    steps[1].ms = `${Math.max(1, Math.round(submitted - t0))} ms`;
+    at = 2; draw();
     ui.pendingRun.messageId = messageId;
     let message = null;
     for (let i = 0; i < 120 && !message; i++) {
@@ -411,6 +401,7 @@ function renderSide() {
     $('avatar').textContent = c.id[0];
     $('me-name').textContent = c.id;
     $('me-key').textContent = `key ${c.pub.slice(0, 6)}…${c.pub.slice(-4)}`;
+    showSession($('me-key'), moves);
   }
 }
 
@@ -424,7 +415,7 @@ function openRun(run) {
     <div class="row"><button class="btn" id="watch-run">▶ Watch it replayed</button></div>
     <div class="proof-out"></div>`);
   $('watch-run').onclick = () => watch(run);
-  panel.run(() => proveRun(CONFIG, ledger, circuit, run, { threshold: ui.status?.threshold ?? 1 }), `${run.id}’s ride`);
+  panel.run(() => proveRun(CONFIG, ledger, moves, circuit, run, { threshold: ui.status?.threshold ?? 1 }), `${run.id}’s ride`);
 }
 
 async function refreshMeta() {
@@ -475,7 +466,7 @@ $('board').addEventListener('click', (e) => {
 $('relay').innerHTML = CONFIG.nodes.map((n, i) => `<option value="${i}">${esc(n.label)}</option>`).join('');
 $('relay').addEventListener('change', (e) => { session.relay = Number(e.target.value); });
 $('open-auth').addEventListener('click', () => session.open());
-$('signout').addEventListener('click', async () => { await topicSession?.clear(); session.signOut(); session.open('signin'); });
+$('signout').addEventListener('click', () => { session.signOut(); session.open('signin'); });
 
 // ---------------------------------------------------------------- start
 
@@ -483,10 +474,7 @@ if (!(await ed25519Supported())) {
   $('banner').textContent = 'This browser has no Ed25519 in WebCrypto. Use a current Chrome, Edge, Firefox or Safari.';
   $('banner').hidden = false;
 }
-session.onChange(() => {
-  if (!session.commander) topicSession?.clear().catch(() => {});
-  renderSide(); renderTop(); renderBoard();
-});
+session.onChange(() => { renderSide(); renderTop(); renderBoard(); });
 await session.restore();
 renderSide();
 requestAnimationFrame(loop);

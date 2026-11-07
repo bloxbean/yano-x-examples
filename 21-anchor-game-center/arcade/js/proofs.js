@@ -1,20 +1,18 @@
-// Proving a run: it is on the ledger, the commander signed exactly these
-// inputs and this score, the inputs replay to that score in this browser, and
-// the record sits under the root anchored on Cardano.
+// Proving a run: it is on the ledger, the commander's session key signed
+// exactly these inputs and this score, the inputs replay to that score in this
+// browser, and the record sits under the root anchored on Cardano.
 
-import { ed25519Verify, fromHex, utf8 } from '../../shared/crypto.js';
-import { MESSAGE_SUBJECT, rootChecks, typedProof } from '../../shared/proofs.js';
+import { fromHex } from '../../shared/crypto.js';
+import { MESSAGE_SUBJECT, authorshipChecks, rootChecks, typedProof } from '../../shared/proofs.js';
 import { RUN_FRAMES, replay } from './sim.js';
-import { decodeInputs, fieldTopic, inputsHash, runStatement } from './runs.js';
+import { decodeInputs, fieldTopic } from './runs.js';
 
-export async function proveRun(cfg, ledger, arcade, run, { threshold } = {}) {
+export async function proveRun(cfg, ledger, moves, arcade, run, { threshold } = {}) {
   const message = await ledger.message(cfg.movesChain, run.messageId);
   if (!message) return { checks: [{ ok: false, text: 'the run is not visible on this member' }] };
-  let body = null;
-  try { body = JSON.parse(new TextDecoder().decode(fromHex(message.bodyHex))); } catch { /* checked below */ }
-  const encoded = body ? fromHex(body.inputs) : new Uint8Array(0);
-  const signed = !!body && await ed25519Verify(fromHex(run.pub), fromHex(body.sig),
-    utf8(runStatement(cfg, arcade.field, body.seed, body.id, body.n, inputsHash(encoded), body.score)));
+  const { checks: signed, body } = await authorshipChecks(moves, message, run.id, run.pub);
+  let encoded = new Uint8Array(0);
+  try { encoded = fromHex(body?.inputs ?? ''); } catch { /* checked below */ }
   let replayed = null;
   try { replayed = replay(fromHex(arcade.seed), decodeInputs(encoded, RUN_FRAMES)).score; } catch { /* stays null */ }
 
@@ -25,11 +23,12 @@ export async function proveRun(cfg, ledger, arcade, run, { threshold } = {}) {
   if (!proof?.proof) return { checks: [{ ok: false, text: 'the member returned no proof' }] };
   const f = proof.fact?.fields ?? {};
   const checks = [
-    { ok: signed, text: `${run.id} signed these inputs and the score ${body?.score?.toLocaleString()} with their commander key` },
+    ...signed,
+    { ok: body?.score === run.score, text: `the signed move claims the score ${body?.score?.toLocaleString() ?? '—'}` },
     { ok: replayed === run.score, text: `replayed here: ${RUN_FRAMES.toLocaleString()} frames of inputs reach ${replayed?.toLocaleString() ?? '—'}` },
     { ok: proof.claimResult?.satisfied === true, text: proof.claimResult?.explanation ?? 'claim not evaluated' },
     { ok: f.height === run.height && f.index === run.index && f.topic === fieldTopic(cfg, arcade.field),
-      text: `recorded at block #${f.height}, position ${f.index}, on this field’s topic` },
+      text: `recorded at block #${f.height}, position ${f.index}, on this field’s topic ${fieldTopic(cfg, arcade.field)}` },
     ...rootChecks(proof, anchor, sealed, threshold),
   ];
   return { sealed, anchor, checks, trust: proof.trust,

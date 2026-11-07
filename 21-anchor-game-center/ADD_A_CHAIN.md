@@ -1,5 +1,13 @@
 # Adding a game chain to a running cluster
 
+> **Historical: Yano X 0.1.0-pre2.** This records how `duels-chain` was added
+> with the pre2 cluster launcher (`./cluster migrate`) and the pre2 showcase
+> deployer. Yano X 0.1.0-pre6 removed that launcher: the game center now seals
+> all three chains together with `yano.sh appchain new/seal/join`
+> ([`chain/games.template.yaml`](chain/games.template.yaml)), and a chain joins
+> a live application through the release's own procedure,
+> `docs/appchain/deployment/add-chain.md` in the distribution.
+
 How `duels-chain`, which runs the [Sealed Duels plugin](plugin/), joined a
 cluster that already had history, without restarting the other chains from
 genesis. First on the local cluster (done and verified), then on the five-member

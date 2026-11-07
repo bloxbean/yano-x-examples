@@ -3,7 +3,7 @@
 **Run time:** about 15 seconds · **Audience:** anyone · **Language:** Java
 
 ```bash
-./cluster start 3
+./cluster start 3     # once, takes a minute or two
 mvn -B package
 ./demo.sh
 ```
@@ -233,5 +233,5 @@ $D review  M3-gamma --actor reviewer-quinn   # same guild — no effect
 $D execute M3-gamma                          # refused
 
 ./cluster stop     # keep data
-./cluster clean    # wipe
+./cluster clean    # stop and wipe .yano/ (chain, member keys, devnet)
 ```

@@ -91,7 +91,7 @@ export class Ledger {
   /**
    * Every finalized message on `topic` at or above `fromHeight`, in log order,
    * with its block's certified timestamp and state root:
-   * [{ height, index, messageId, timestamp, stateRoot, bodyHex }].
+   * [{ height, index, messageId, topic, timestamp, stateRoot, bodyHex }].
    */
   async entriesFrom(chain, topic, fromHeight) {
     const t = encodeURIComponent(topic);
@@ -112,7 +112,7 @@ export class Ledger {
       for (const m of block?.messages ?? []) {
         const ref = refs.get(m.messageId);
         if (!ref || m.topic !== topic) continue;
-        entries.push({ height: block.height, index: ref.index, messageId: m.messageId,
+        entries.push({ height: block.height, index: ref.index, messageId: m.messageId, topic: m.topic,
           timestamp: block.timestamp, stateRoot: block.stateRoot, bodyHex: m.bodyHex });
       }
     }

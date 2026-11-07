@@ -53,7 +53,8 @@ pause
 step "2. Wait for it to be anchored"
 printf '  waiting for the next anchor transaction'
 for _ in $(seq 1 40); do
-  [ "$(curl -fsS http://127.0.0.1:7150/api/v1/app-chain/chains/evidence-chain/status | jq -r '.anchor.anchoredCount')" != "0" ] && break
+  curl -fsS http://127.0.0.1:7150/api/v1/app-chain/chains/evidence-chain/status \
+    | jq -e '.tipHeight > 0 and .anchor.lastAnchoredHeight >= .tipHeight' >/dev/null && break
   printf '.'; sleep 2
 done
 printf '\n\n'

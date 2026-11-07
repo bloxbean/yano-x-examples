@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Start, inspect and stop a local three-member orders-chain for this game.
+#
+# You only need this to play offline. The page itself talks to the public
+# showcase cluster; this gives it a private one with the same chain id, sealed
+# from chain/orders.template.yaml and anchored on a local devnet.
+#
+#   ./cluster start 3     three members on a private devnet (HTTP 7200..7202)
+#   ./cluster status      per-member tip, state root and cross-member agreement
+#   ./cluster logs 0 -f   member 0's log
+#   ./cluster stop        stop the members, keep the data
+#   ./cluster clean       stop and wipe .yano/ (chain, member keys, devnet)
+#
+# Then: YANO_NODES=http://127.0.0.1:7200,http://127.0.0.1:7201,http://127.0.0.1:7202 node serve.mjs
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd -P)"
+
+export EXAMPLE_HTTP_BASE="${EXAMPLE_HTTP_BASE:-7200}"
+export EXAMPLE_SERVER_BASE="${EXAMPLE_SERVER_BASE:-13500}"
+
+. "$HERE/../00-shared/lib/example-cluster.sh"
+example_cluster "$HERE" "$@"

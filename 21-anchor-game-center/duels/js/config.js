@@ -2,25 +2,18 @@
 // rules here are part of the deterministic fold in duels.js; changing them,
 // or `app`, is a new game version.
 
-import { CENTER } from '../../shared/config.js';
+import { CENTER, scopeOf } from '../../shared/config.js';
 
-// Two editions of the same game (README: "Two ways to run the rules"):
-//   browser  moves on orders-chain; every browser runs the rules (duels.js)
-//   plugin   moves on duels-chain; the members run the same rules in Java
-//            (plugin/) and the browser checks their result: ?engine=plugin
+// Two editions of the same game (README: "Sealed Duels · plugin edition"):
+//   browser  moves on games-chain under games/duels/, signed by the player's
+//            session key; every browser runs the rules (duels.js)
+//   plugin   moves on duels-chain, each carrying the commander's signature; the
+//            members run the same rules in Java (plugin/) and the browser checks
+//            their result: ?engine=plugin
 const PLUGIN = typeof location !== 'undefined' && new URLSearchParams(location.search).get('engine') === 'plugin';
 
-export const CONFIG = {
-  get nodes() { return CENTER.nodes; },
-  get explorerTx() { return CENTER.explorerTx; },
-  engine: PLUGIN ? 'plugin' : 'browser',
-  movesChain: PLUGIN ? CENTER.duelsChain : CENTER.movesChain,
-  // Who owns a call sign. The browser checks the commander profile on the
-  // profile chain; a state machine sees only its own chain, so the plugin
-  // edition binds a call sign to the first key that uses it there.
-  keyBinding: PLUGIN ? 'first-seen' : 'profile-chain',
+const GAME = {
   app: 'anchor-duels/v1',
-
   lobbyMs: 60 * 60_000, // one lobby topic per hour; the page reads this hour and the last
   challengeMs: 10 * 60_000, // an open challenge expires after ten minutes
   roundOptions: [5, 7],
@@ -37,3 +30,24 @@ export const CONFIG = {
     { id: 'recharge', name: 'Recharge', icon: '✚', cost: -2, color: '#ffcc4d', fx: '+2 energy. You are open.' },
   ],
 };
+
+/** One edition's settings. The plugin's topic names are fixed by plugin/ (Duels.java). */
+export function edition(plugin) {
+  return {
+    ...GAME,
+    get nodes() { return CENTER.nodes; },
+    get explorerTx() { return CENTER.explorerTx; },
+    engine: plugin ? 'plugin' : 'browser',
+    movesChain: plugin ? CENTER.duelsChain : CENTER.movesChain,
+    sessions: !plugin,
+    scope: plugin ? null : scopeOf('duels'),
+    topicBase: plugin ? 'anchor-duels.v1.' : scopeOf('duels'),
+    // Who owns a call sign. The browser checks the commander profile on the
+    // profile chain; a state machine sees only its own chain, so the plugin
+    // edition binds a call sign to the first key that uses it there.
+    keyBinding: plugin ? 'first-seen' : 'profile-chain',
+  };
+}
+
+export const CONFIG = edition(PLUGIN);
+export const PLUGIN_CONFIG = edition(true);

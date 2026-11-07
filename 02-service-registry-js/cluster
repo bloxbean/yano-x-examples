@@ -1,16 +1,41 @@
 #!/usr/bin/env bash
 # Start, inspect and stop the three-member service registry for this example.
 #
-#   ./cluster start 3     three members on a private devnet (HTTP 7110..7112)
+#   ./cluster start 3     seal chain/service-registry.template.yaml for three
+#                         members on a private devnet and start them (HTTP 7110..7112)
 #   ./cluster status      per-member tip, state root and cross-member agreement
-#   ./cluster stop        stop the members, keep the data
+#   ./cluster stop [n]    stop the members (or just member n), keep the data
+#   ./cluster logs <n>    member n's log
 #   ./cluster clean       stop and wipe .yano/
+#
+# trust.json pins the members' public keys, so each member is given its DEMO key
+# before its first `yano.sh appchain request`: node i's seed is the byte i+1,
+# repeated 32 times. These keys are public; never use them for anything real.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
 
 export EXAMPLE_HTTP_BASE="${EXAMPLE_HTTP_BASE:-7110}"
 export EXAMPLE_SERVER_BASE="${EXAMPLE_SERVER_BASE:-13410}"
+
+# request keeps a member key it finds in <node-dir>/secrets/member.key.
+seed_demo_keys() {
+  local nodes=3 arg i b key seed
+  for arg in "$@"; do
+    case "$arg" in ''|*[!0-9]*) ;; *) nodes="$arg" ;; esac
+  done
+  for ((i = 0; i < nodes; i++)); do
+    key="$HERE/.yano/node$i/secrets/member.key"
+    [ -f "$key" ] && continue
+    mkdir -p "${key%/*}"
+    chmod 700 "$HERE/.yano" "$HERE/.yano/node$i" "${key%/*}"
+    seed=""
+    for ((b = 0; b < 32; b++)); do seed+="$(printf '%02x' $((i + 1)))"; done
+    (umask 077; printf '%s\n' "$seed" > "$key")
+  done
+}
+
+[ "${1:-}" = start ] && seed_demo_keys "${@:2}"
 
 . "$HERE/../00-shared/lib/example-cluster.sh"
 example_cluster "$HERE" "$@"

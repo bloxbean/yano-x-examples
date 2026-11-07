@@ -1,22 +1,27 @@
 // Proving a round: each seal was final before the other side's reveal (so
 // nobody chose after seeing), each reveal matches its seal, the die is the
-// hash of both secrets, every message is signed by its commander — and all of
-// it is recorded under the root anchored on Cardano.
+// hash of both secrets, every message is signed by its player (their session
+// key in the browser edition, their commander key in the plugin edition) — and
+// all of it is recorded under the root anchored on Cardano.
 
 import { ed25519Verify, fromHex, utf8 } from '../../shared/crypto.js';
-import { MESSAGE_SUBJECT, rootChecks, typedProof } from '../../shared/proofs.js';
+import { MESSAGE_SUBJECT, authorshipChecks, rootChecks, typedProof } from '../../shared/proofs.js';
 import { rollDie, sealHash, statement } from './duels.js';
 
-async function signedBy(cfg, ledger, duel, seat, ref, kind, fields) {
+async function signedBy(cfg, ledger, moves, duel, seat, ref, kind, fields) {
   const message = await ledger.message(cfg.movesChain, ref.messageId);
   if (!message) return false;
-  let body;
-  try { body = JSON.parse(new TextDecoder().decode(fromHex(message.bodyHex))); } catch { return false; }
-  return ed25519Verify(fromHex(duel.players[seat].pub), fromHex(body.sig),
-    utf8(statement(cfg, duel.duelId, kind, duel.players[seat].id, ...fields)));
+  const player = duel.players[seat];
+  const { checks } = await authorshipChecks(moves, message, player.id, player.pub, async () => {
+    let body;
+    try { body = JSON.parse(new TextDecoder().decode(fromHex(message.bodyHex))); } catch { return { ok: false }; }
+    return { ok: await ed25519Verify(fromHex(player.pub), fromHex(body.sig),
+      utf8(statement(cfg, duel.duelId, kind, player.id, ...fields))) };
+  });
+  return checks.every((c) => c.ok);
 }
 
-export async function proveRound(cfg, ledger, duel, record, { threshold } = {}) {
+export async function proveRound(cfg, ledger, moves, duel, record, { threshold } = {}) {
   const names = duel.players.map((p) => p.id);
   const checks = [];
   for (const seat of [0, 1]) {
@@ -27,8 +32,8 @@ export async function proveRound(cfg, ledger, duel, record, { threshold } = {}) 
       checks.push({ ok: seal.height < otherReveal.height,
         text: `${names[seat]}’s seal was final at block #${seal.height}, before ${names[1 - seat]} revealed at #${otherReveal.height}` });
     }
-    checks.push({ ok: await signedBy(cfg, ledger, duel, seat, seal, 'seal', [record.round, seal.hash]),
-      text: `${names[seat]} signed the seal ${seal.hash.slice(0, 10)}…` });
+    checks.push({ ok: await signedBy(cfg, ledger, moves, duel, seat, seal, 'seal', [record.round, seal.hash]),
+      text: `${names[seat]} signed the seal ${seal.hash.slice(0, 10)}…${cfg.sessions ? ' with their session key' : ''}` });
     const reveal = record.reveals[seat];
     if (!reveal) { checks.push({ ok: true, text: `${names[seat]} never revealed — forfeited at the deadline` }); continue; }
     checks.push({ ok: sealHash(cfg, duel.duelId, record.round, names[seat], reveal.move, reveal.secret) === seal.hash,
@@ -85,7 +90,7 @@ async function pluginRound(cfg, ledger, duel, record, refs, checks, threshold) {
  * duel record to the state root under `duel/<id>`, so one state proof at the
  * anchored height shows who won — no move needs replaying to trust it.
  */
-export async function proveDuel(cfg, ledger, duel, { threshold } = {}) {
+export async function proveDuel(cfg, ledger, moves, duel, { threshold } = {}) {
   const state = await duelState(cfg, ledger, duel);
   const { key, proof, record } = state;
   if (!proof) return { checks: [{ ok: false, text: 'the member returned no proof' }] };

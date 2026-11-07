@@ -45,7 +45,7 @@
           </div>
         </div>
         <div class="me-row">
-          <span class="small">Ready for every game below.</span>
+          <span class="small">Ready for every game below — each one gets its own one-hour session key.</span>
           <span><button class="link" id="prove-me">Prove my profile</button> ·
             <button class="link" id="signout">Sign out</button></span>
         </div>
@@ -56,8 +56,12 @@
   <section class="games" id="games"></section>
 
   <section class="how">
-    <div class="step"><b>Two app ledgers</b><span>Commanders live on <code>authenticated-map-chain</code>;
-      game moves go to <code>orders-chain</code>. Both are stock Yano X machines — no game code on the members.</span></div>
+    <div class="step"><b>One state machine, many games</b><span>Commanders live on <code>authenticated-map-chain</code>;
+      every game’s moves go to <code>games-chain</code>, one stock ordered log. Each game owns a protected
+      namespace there (<code>games/galaxy/</code>, …) and each round, field or duel is a topic below it.</span></div>
+    <div class="step"><b>You sign, with a session key</b><span>Each game gives your browser a one-hour session key,
+      authorized by the publisher’s delegation service after it checks your profile. The members accept a move on
+      <code>games/</code> only if a session key signed it — nobody can move for you, not even a member.</span></div>
     <div class="step"><b>Same game everywhere</b><span>Each game is a deterministic program over the finalized
       log, so every browser shows the same outcome with no game server.</span></div>
     <div class="step"><b>Sealed on Cardano</b><span>The members anchor each ledger’s state root on Cardano.

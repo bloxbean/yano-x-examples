@@ -1,0 +1,38 @@
+# Example 07 as an app-chain template: release approvals that call an ERP.
+#
+# ./cluster start turns it into a draft with
+#   yano.sh appchain new release-approvals --from chain/release-approvals.template.yaml
+# then runs the ordinary setup commands (request, seal, join, start) for three
+# local members on a private devnet.
+#
+# These are the CONSENSUS-SHARED settings: seal fixes them for every member, and
+# together they decide that reaching approval emits an effect. The executor that
+# actually performs the HTTP call is node-local: ./cluster writes it into
+# node0's config/local.yaml only - see README.md.
+membership: static     # the member set is fixed at seal; `governed` lets members vote changes in
+sequencing: fixed      # the lead (node0) proposes every block
+chains:
+  # Release approvals on the release's approval-workflow recipe (the stock
+  # approvals state machine).
+  - id: release-chain
+    recipe: approval-workflow
+    settings:
+      block.interval-ms: "200"
+
+      # Turn the effect runtime on for this chain.
+      effects.enabled: "true"
+
+      # Emit one effect when an approval reaches its threshold. This is
+      # consensus: every member agrees the effect was emitted, and later agrees
+      # what its outcome was.
+      #
+      #   type  routes it to an executor contract - webhook.post here. The
+      #         approvals machine does not interpret the payload; it only
+      #         carries it.
+      #   gate  app-final: emit only after the block is finalized.
+      machines.approvals.on-approved-effect.enabled: "true"
+      machines.approvals.on-approved-effect.type: webhook.post
+      machines.approvals.on-approved-effect.gate: app-final
+      machines.approvals.activations.on-approved-effect: "1"
+    # ./cluster start anchors it to Cardano in script mode (--no-anchor skips it).
+    anchor: {mode: script, every-blocks: 10}

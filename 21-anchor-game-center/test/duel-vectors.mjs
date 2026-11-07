@@ -12,10 +12,10 @@ import { blake2b } from '../shared/blake2b.js';
 import { createCommander } from '../shared/accounts.js';
 import { ACCOUNTS } from '../shared/config.js';
 import { toHex, utf8 } from '../shared/crypto.js';
-import { CONFIG as BASE } from '../duels/js/config.js';
+import { PLUGIN_CONFIG } from '../duels/js/config.js';
 import { Duel, Lobby, duelTopic, lobbyOf, lobbyTopic, sealHash, statement } from '../duels/js/duels.js';
 
-const CONFIG = { ...BASE, movesChain: 'duels-chain', keyBinding: 'first-seen' };
+const CONFIG = PLUGIN_CONFIG; // the plugin edition: duels-chain, signed moves, first-seen call signs
 const commanders = {};
 for (const id of ['satya', 'nova', 'mallory']) {
   commanders[id] = (await createCommander(ACCOUNTS, id, 'correct horse battery', 1000)).commander;

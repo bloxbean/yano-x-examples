@@ -3,7 +3,7 @@
 **Run time:** about 4 minutes · **Audience:** anyone · **Language:** JavaScript
 
 ```bash
-./cluster start 3     # once, takes ~40s
+./cluster start 3     # once, takes a minute or two
 ./demo.sh             # the walkthrough
 ```
 
@@ -192,7 +192,7 @@ Deleting releases the key, and the next writer owns it — including a rival.
   practice, combine it with reading from more than one member — but be clear
   about which half you have checked.
 - **The trusted keys have to come from somewhere real.** Here they are the
-  launcher's published demo keys. In a deployment `trust.json` is the output of
+  example's published demo keys. In a deployment `trust.json` is the output of
   a genesis ceremony where each organization generated its own key.
 - **Values are application data.** `value-format: utf8` validates structure,
   not meaning. Version your values if consumers must decode them reliably.
@@ -233,5 +233,5 @@ node src/cli.js get clearing.borealis   # the value is not
 
 ```bash
 ./cluster stop     # stop the members, keep the data
-./cluster clean    # stop and wipe .yano/
+./cluster clean    # stop and wipe .yano/ (chain, member keys, devnet)
 ```

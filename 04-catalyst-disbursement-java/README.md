@@ -12,7 +12,7 @@ check it against Cardano.
 | Capability | `state:role-approvals` (preview), `anchor:script`, Cardano tx submission |
 | Members | 3 nodes, threshold 2 |
 | Actors | 4 people, 3 organizations, 1 policy |
-| Needs | Java 25, Maven, `curl`, `jq`, `python3` |
+| Needs | Java 25, Maven, `curl`, `jq`, Yano X 0.1.0-pre6 |
 | Network | Local devnet — faucet-funded treasury, no real funds |
 
 ## The gap this closes
@@ -95,7 +95,7 @@ after signing and refuses if it moved.
 ## Run it
 
 ```bash
-./cluster start 3   # ~40s, anchoring bootstrapped automatically
+./cluster start 3   # a minute or two the first time, anchored automatically
 mvn -B package
 ./demo.sh           # ~20s
 ```
@@ -160,8 +160,8 @@ body, which changes the id.
 ## Files
 
 ```
-chain/application-appchain.yml   the chain definition
-cluster                          start / stop / status
+chain/disbursement.template.yaml the application as an app-chain template (commented)
+cluster                          start / stop / status: seals and runs the template
 demo.sh                          the guided walkthrough
 src/main/java/.../
   Cast.java                      reviewers, guilds, demo keys

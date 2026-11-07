@@ -10,6 +10,7 @@ import { ACCOUNTS } from './config.js';
 import { CALLSIGN, createCommander, forgetDevice, rememberOnDevice, restoreFromDevice, unlockCommander }
   from './accounts.js';
 import { Profiles } from './profiles.js';
+import { forgetSessions } from './sessions.js';
 import { esc } from './ui.js';
 
 const STEPS = {
@@ -54,6 +55,7 @@ export class Session {
 
   signOut() {
     forgetDevice(ACCOUNTS);
+    forgetSessions(this.commander?.id); // and every game's session key for this commander
     this.commander = null;
     this.profileHeight = null;
     this.#emit();

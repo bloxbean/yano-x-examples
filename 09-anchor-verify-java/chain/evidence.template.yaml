@@ -1,0 +1,23 @@
+# Example 09 as an app-chain template: anchor and verify.
+#
+# ./cluster start turns it into a draft with
+#   yano.sh appchain new evidence --from chain/evidence.template.yaml
+# then runs the ordinary setup commands (request, seal, join, start) for three
+# local members on a private devnet, and anchors the chain to Cardano. seal
+# fixes the operators, threshold, member keys, plugin digests and the chain's
+# genesis identity; nothing here is per node.
+membership: static     # the member set is fixed at seal; every anchor datum carries it
+sequencing: fixed      # the lead (node0) proposes every block
+chains:
+  # A plain ordered-log, on the release's audit-log recipe. The interesting
+  # part of this example is not the state machine; it is that the verifier
+  # never talks to this chain at all.
+  - id: evidence-chain
+    recipe: audit-log
+    settings:
+      block.interval-ms: "200"
+    # The point of the example: ./cluster start anchors the chain to Cardano in
+    # script mode, a thread NFT whose datum carries the state root, the member
+    # set and the threshold. Every block is anchored, so each record reaches
+    # Cardano a few seconds after it is finalized.
+    anchor: {mode: script, every-blocks: 1}

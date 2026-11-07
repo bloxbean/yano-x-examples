@@ -17,7 +17,7 @@ import { Arcade, decodeInputs, encodeInputs, fieldSeed, inputsHash, runStatement
 import { CONFIG as LAND } from '../land/js/config.js';
 import { Land, claimStatement, decodeCommand, generateMap as landMap, seasonSeed, tileKey } from '../land/js/land.js';
 import { encode } from '../shared/cbor.js';
-import { CONFIG as DUELS } from '../duels/js/config.js';
+import { CONFIG as DUELS, PLUGIN_CONFIG } from '../duels/js/config.js';
 import { Duel, Lobby, damage, rollDie, sealHash, statement as duelStatement } from '../duels/js/duels.js';
 import { profileKey } from '../shared/accounts.js';
 import { rng } from '../shared/rng.js';
@@ -27,10 +27,12 @@ import { CONFIG as REEF } from '../reef/js/config.js';
 import { Reef, Timeline, census, seedStatement, shape, soup, stamp, step, worldHash } from '../reef/js/reef.js';
 import { CONFIG as MOTO } from '../moto/js/config.js';
 import { Run as Ride, Track, autopilot as rider, replay as replayRide, THROTTLE as GAS } from '../moto/js/sim.js';
-import { createSessionKey, signerFromKey, issueDelegation, signWrite, encodeCanonicalValue, hex }
-  from '../shared/topic-client/topics.mjs';
 import { Circuit, circuitSeed, inputsHash as rideHash, runStatement as rideStatement, splitStatement } from '../moto/js/races.js';
 import { CONFIG as SONAR } from '../sonar/js/config.js';
+import { Moves, openMove, passStatement, requestStatement } from '../shared/sessions.js';
+import * as Topics from '../shared/topic-client/topics.mjs';
+import { createDelegationService } from '../delegation/service.mjs';
+import { TOPIC_ENTRIES } from '../shared/config.js';
 import { Battle, Lobby as SonarLobby, answerFor, fleetRoot, merkleLevels, randomFleet, statement as sonarStatement,
   validFleet, verifyAnswer } from '../sonar/js/sonar.js';
 
@@ -64,21 +66,38 @@ async function commander(id) {
   if (!commanders.has(id)) commanders.set(id, (await createCommander(ACCOUNTS, id, 'correct horse battery', FAST)).commander);
   return commanders.get(id);
 }
+// Session games: the rules see what shared/sessions.js openMove hands them — the
+// move, and its author: the call sign the move's session pass claims, with the key
+// of whoever signed it. (openMove itself is tested against real frames below.)
+// Builders still compute the commander signature `sig`; session entries drop it.
+const SIGNER = Symbol('signer');
+const signedBy = (c, move) => ({ ...move, [SIGNER]: c });
+const OPENER = { id: 'opener', pub: '00'.repeat(32) }; // whoever posts a bare marker such as {"t":"open"}
+function sessionEntry(move, at) {
+  const c = move[SIGNER] ?? (typeof move.id === 'string' ? commanders.get(move.id) : null) ?? OPENER;
+  const body = JSON.parse(JSON.stringify(move));
+  delete body.sig;
+  return { ...at, session: true, body,
+    author: { id: typeof move.id === 'string' ? move.id : c.id, pub: c.pub, session: 'ab'.repeat(32) } };
+}
+/** A signed game's entry (the duels plugin edition): plain JSON with the commander's `sig`. */
+const signedEntry = (move, at) => ({ ...at, bodyHex: toHex(utf8(JSON.stringify(move))) });
+
 let nonce = 0;
 async function join(id, n = ++nonce) {
   const c = await commander(id);
   const sig = await c.sign(moveStatement(CONFIG, ROUND, 'join', id, n, [c.pub]));
-  return { t: 'join', id, pub: c.pub, n, sig };
+  return signedBy(c, { t: 'join', id, pub: c.pub, n, sig });
 }
 async function go(id, from, to, pct = 50, n = ++nonce) {
   const c = await commander(id);
   const sig = await c.sign(moveStatement(CONFIG, ROUND, 'go', id, n, [from, to, pct]));
-  return { t: 'go', id, n, from, to, pct, sig };
+  return signedBy(c, { t: 'go', id, n, from, to, pct, sig });
 }
 let height = 0;
 const entry = (move, timestamp, index = 0) => {
   height += 1;
-  return { height, index, messageId: `m${height}`, timestamp, bodyHex: toHex(utf8(JSON.stringify(move))) };
+  return sessionEntry(move, { height, index, messageId: `m${height}`, timestamp });
 };
 const anyone = async () => ({ ok: true });
 
@@ -144,6 +163,163 @@ await check('short passwords and bad call signs are refused before anything is g
   await throws(() => createCommander(ACCOUNTS, 'Bad Name', 'correct horse battery', FAST), /Call signs/);
 });
 
+console.log('session keys');
+
+// Real frames, made with the release's topic client exactly as a browser makes them.
+const GEN = '5e'.repeat(32);
+const ISSUER = Topics.signerFromKey(await Topics.createSessionKey());
+const TOPICS = { chainId: 'games-chain', generationId: GEN, issuers: [ISSUER.publicKey], delegationEndpoint: 'http://service.test/delegations' };
+const GALAXY_TOPIC = 'games/galaxy/r1';
+async function credential(session, scope = 'games/galaxy/', issuer = ISSUER) {
+  const notBefore = Date.now() - 1000;
+  return Topics.issueDelegation({ chainId: TOPICS.chainId, generationId: GEN, delegate: session, scope, notBefore,
+    notAfter: notBefore + 3_600_000, issuer });
+}
+async function passFor(c, session, scope = 'games/galaxy/') {
+  return { id: c.id, pub: c.pub, sig: await c.sign(passStatement(TOPICS, scope, c.id, c.pub, session)) };
+}
+async function framed(move, { key, scope = 'games/galaxy/', issuer = ISSUER, pass, topic = GALAXY_TOPIC } = {}) {
+  key ??= await Topics.createSessionKey();
+  const delegation = await credential(key.publicKey, scope, issuer);
+  const payload = utf8(JSON.stringify(pass === null ? move : { ...move, pass }));
+  const frame = await Topics.signWrite({ chainId: TOPICS.chainId, generationId: GEN, topic, payload, nonce: Topics.nonce(),
+    notAfter: Date.now() + 60_000, delegation }, [Topics.signerFromKey(key)]);
+  return { height: 1, index: 0, messageId: 'm1', topic, timestamp: 0, bodyHex: Topics.hex(frame) };
+}
+const open = (e, scope = 'games/galaxy/') => openMove(TOPICS, scope, e);
+
+await check('a session move opens: the session, credential and pass signatures all check here', async () => {
+  const satya = await commander('satya');
+  const key = await Topics.createSessionKey();
+  const opened = await open(await framed({ t: 'go', id: 'satya', n: 1 }, { key, pass: await passFor(satya, key.publicKey) }));
+  eq(opened.refusal, null);
+  eq(opened.author.id, 'satya');
+  eq(opened.author.pub, satya.pub);
+  eq(opened.author.session, key.publicKey);
+  eq(opened.author.issuer, ISSUER.publicKey);
+  eq(JSON.stringify(opened.body), '{"t":"go","id":"satya","n":1}', 'the pass is not part of the move');
+});
+await check('a tampered payload, a plain write, a direct write or a foreign issuer does not open', async () => {
+  const satya = await commander('satya');
+  const key = await Topics.createSessionKey();
+  const honest = await framed({ t: 'go', id: 'satya', n: 1 }, { key, pass: await passFor(satya, key.publicKey) });
+  const [v, , proof] = Topics.decodeWire('frame', Topics.unhex(honest.bodyHex));
+  const altered = Topics.encodeWire('frame', [v, utf8(JSON.stringify({ t: 'go', id: 'satya', n: 1, pct: 100 })), proof]);
+  assert(/does not verify/.test((await open({ ...honest, bodyHex: Topics.hex(altered) })).refusal), 'tampered');
+  eq((await open({ ...honest, bodyHex: toHex(utf8('{"t":"go","id":"satya"}')) })).refusal, 'not a session move');
+  const direct = await Topics.signWrite({ chainId: TOPICS.chainId, generationId: GEN, topic: GALAXY_TOPIC,
+    payload: utf8('{"t":"open"}'), nonce: Topics.nonce(), notAfter: Date.now() + 60_000 }, [ISSUER]);
+  eq((await open({ ...honest, bodyHex: Topics.hex(direct) })).refusal, 'not written with a session key');
+  const rogue = Topics.signerFromKey(await Topics.createSessionKey());
+  const foreign = await framed({ t: 'go', id: 'satya', n: 1 }, { key, issuer: rogue, pass: await passFor(satya, key.publicKey) });
+  eq((await open(foreign)).refusal, 'the credential is from an unknown issuer');
+});
+await check('a credential for the whole namespace or another game does not open in this game', async () => {
+  const satya = await commander('satya');
+  const key = await Topics.createSessionKey();
+  const wide = await framed({ t: 'go', id: 'satya', n: 1 }, { key, scope: 'games/', pass: await passFor(satya, key.publicKey, 'games/') });
+  eq((await open(wide)).refusal, 'the credential is for games/, not games/galaxy/');
+  const derby = await framed({ t: 'bet', id: 'satya', n: 1 }, { key, scope: 'games/derby/', topic: 'games/derby/h1',
+    pass: await passFor(satya, key.publicKey, 'games/derby/') });
+  eq((await open(derby)).refusal, 'the credential is for games/derby/, not games/galaxy/');
+  eq((await open(derby, 'games/derby/')).author.id, 'satya', 'it opens in its own game');
+});
+await check('a pass must be signed by the commander it names, for exactly this session key', async () => {
+  const satya = await commander('satya');
+  const mallory = await commander('mallory');
+  const key = await Topics.createSessionKey();
+  const claimed = { id: 'satya', pub: satya.pub, sig: await mallory.sign(passStatement(TOPICS, 'games/galaxy/', 'satya', satya.pub, key.publicKey)) };
+  eq((await open(await framed({ t: 'go', id: 'satya', n: 1 }, { key, pass: claimed }))).refusal,
+    'the session pass is not signed by that commander');
+  const satyasKey = await Topics.createSessionKey();
+  const copied = await passFor(satya, satyasKey.publicKey); // satya's real pass, on mallory's session
+  eq((await open(await framed({ t: 'go', id: 'satya', n: 1 }, { key, pass: copied }))).refusal,
+    'the session pass is not signed by that commander');
+  eq((await open(await framed({ t: 'go', id: 'satya', n: 1 }, { key, pass: null }))).refusal, 'the move carries no session pass');
+});
+
+// The delegation service, with a profile chain made of real registered profiles.
+const registered = new Map();
+async function enlist(id) {
+  const { commander: c, profileBytes } = await createCommander(ACCOUNTS, id, 'correct horse battery', FAST);
+  registered.set(id, { present: true, status: 0, revision: 1, createdHeight: 3, committedHeight: 9, value: profileBytes });
+  return c;
+}
+let issuerActive = true;
+const service = createDelegationService({ chainId: TOPICS.chainId, generationId: GEN, issuer: ISSUER,
+  scopes: TOPIC_ENTRIES.map((e) => e.scope), lookupProfile: async (id) => registered.get(id) ?? { present: false },
+  checkAuthority: async () => issuerActive });
+async function login(c, { scope = 'games/galaxy/', as = c, session, issuedAt = Date.now(), nonce = Topics.nonce() } = {}) {
+  const request = { v: 1, chainId: TOPICS.chainId, generationId: GEN, scope, id: as.id, pub: as.pub,
+    session: session ?? (await Topics.createSessionKey()).publicKey, issuedAt, expiresAt: issuedAt + 60_000, nonce };
+  request.sig = await c.sign(requestStatement(request));
+  return request;
+}
+const refusal = async (request) => { try { await service(request); return 'issued'; } catch (error) { return error.code; } };
+
+await check('the delegation service signs a one-hour credential for a fresh request from the profile’s key', async () => {
+  const pilot = await enlist('pilot');
+  const request = await login(pilot, { scope: 'games/arcade/' });
+  const { delegationHex } = await service(request);
+  const d = Topics.decodeWire('delegation', Topics.unhex(delegationHex));
+  eq(Topics.hex(d[1]), request.session, 'for the browser’s session key');
+  eq(d[2], 'games/arcade/', 'for one game');
+  eq(Number(d[4]) - Number(d[3]), 3_600_000, 'for an hour');
+  assert(await Topics.verifyDelegation(TOPICS.chainId, GEN, Topics.unhex(delegationHex)), 'signed by the issuer');
+  eq(await refusal(request), 'DELEGATION_REQUEST_REPLAYED');
+});
+await check('the service refuses forged, borrowed, stale, unknown and out-of-scope requests', async () => {
+  const pilot = await enlist('ace');
+  const mallory = await enlist('mallory2');
+  eq(await refusal(await login(mallory, { as: pilot })), 'DELEGATION_AUTHENTICATION_FAILED', 'mallory signing as ace');
+  eq(await refusal(await login(mallory, { as: { id: 'ace', pub: mallory.pub } })), 'DELEGATION_PROFILE_INVALID',
+    'ace’s call sign with mallory’s key');
+  eq(await refusal(await login(await commander('ghost'))), 'DELEGATION_PROFILE_INVALID', 'no profile');
+  eq(await refusal(await login(pilot, { issuedAt: Date.now() - 120_000 })), 'DELEGATION_REQUEST_EXPIRED');
+  eq(await refusal(await login(pilot, { scope: 'games/chess/' })), 'DELEGATION_SCOPE_UNKNOWN');
+  eq(await refusal({ ...(await login(pilot)), scope: 'games/' }), 'DELEGATION_REQUEST_INVALID');
+  issuerActive = false;
+  eq(await refusal(await login(pilot)), 'DELEGATION_ISSUER_INACTIVE');
+  issuerActive = true;
+});
+await check('a page’s moves: the commander signs one login and one pass, the session key signs every move', async () => {
+  const pilot = await enlist('wing');
+  let commanderSignatures = 0;
+  const signer = { id: pilot.id, pub: pilot.pub, sign: (text) => { commanderSignatures++; return pilot.sign(text); } };
+  const sent = [];
+  const ledger = { submit: async (chain, relay, topic, payload) => { sent.push({ chain, topic, ...payload }); return { messageId: `x${sent.length}` }; } };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => new Response(JSON.stringify(await service(JSON.parse(init.body))), { status: 200 });
+  try {
+    const moves = new Moves(ledger, CONFIG, TOPICS);
+    const topic = `games/galaxy/r${ROUND}`;
+    await moves.submit(signer, 0, topic, { t: 'join', id: 'wing', pub: pilot.pub, n: 1 });
+    await moves.submit(signer, 0, topic, { t: 'go', id: 'wing', n: 2, from: 0, to: 9, pct: 50 });
+    await moves.submit(signer, 0, topic, { t: 'go', id: 'wing', n: 3, from: 0, to: 10, pct: 50 });
+    eq(commanderSignatures, 2, 'one login request and one pass');
+    eq(sent.length, 3);
+    eq(sent[0].chain, 'games-chain');
+    const g = new Galaxy(CONFIG, ROUND);
+    for (const [i, m] of sent.entries()) {
+      const e = await openMove(TOPICS, CONFIG.scope, { height: 1, index: i, messageId: `x${i}`, topic: m.topic, timestamp: T0 + 1000, bodyHex: m.bodyHex });
+      eq(e.author?.id, 'wing');
+      assert((await g.apply(e, anyone)).accepted, `move ${i} applies`);
+    }
+    await moves.clear();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+await check('every session game writes under its own registered entry', async () => {
+  const configs = { galaxy: CONFIG, arcade: ARCADE, duels: DUELS, derby: DERBY, reef: REEF, sonar: SONAR, moto: MOTO };
+  for (const [game, cfg] of Object.entries(configs)) {
+    assert(cfg.sessions && cfg.movesChain === 'games-chain', `${game} is a session game on games-chain`);
+    eq(cfg.scope, TOPIC_ENTRIES.find((e) => e.game === game).scope, game);
+    assert(Topics.isNamespace(cfg.scope) && cfg.scope.startsWith('games/'), `${game}: ${cfg.scope}`);
+  }
+  assert(!PLUGIN_CONFIG.sessions && PLUGIN_CONFIG.movesChain === 'duels-chain', 'the plugin edition stays signed');
+});
+
 console.log('the galaxy');
 
 await check('isqrt is exact', () => {
@@ -200,13 +376,13 @@ await check("you can only launch from your own planets, and nonces can't be repl
   assert((await g.apply(entry(move, T0 + 20), anyone)).accepted);
   eq((await g.apply(entry(move, T0 + 30), anyone)).reason, 'stale nonce (replayed)');
 });
-await check('a forged or altered move is refused', async () => {
+await check('a move from another commander’s session, or one that did not open, is refused', async () => {
   const g = new Galaxy(CONFIG, ROUND);
   await g.apply(entry(await join('satya'), T0), anyone);
-  const move = { ...(await go('satya', 0, 9, 25)), pct: 100 };
-  eq((await g.apply(entry(move, T0 + 1), anyone)).reason, 'launch signature does not verify');
-  const forged = { ...(await go('mallory', 0, 9, 25)), id: 'satya' };
+  const forged = { ...(await go('mallory', 0, 9, 25)), id: 'satya' }; // mallory's session claiming satya
   eq((await g.apply(entry(forged, T0 + 2), anyone)).reason, 'launch signature does not verify');
+  const unopened = { ...entry(await go('satya', 0, 9, 25), T0 + 3), author: null };
+  eq((await g.apply(unopened, anyone)).reason, 'launch signature does not verify');
 });
 await check('joins are checked against the profile ledger, which may say "later"', async () => {
   const g = new Galaxy(CONFIG, ROUND);
@@ -232,8 +408,7 @@ await check('a block caps launches per commander', async () => {
   height += 1;
   const results = [];
   for (let i = 0; i <= CONFIG.game.maxLaunchesPerBlock; i++) {
-    const e = { height, index: i, messageId: `b${i}`, timestamp: T0 + 50,
-      bodyHex: toHex(utf8(JSON.stringify(await go('satya', 0, 8 + i, 25)))) };
+    const e = sessionEntry(await go('satya', 0, 8 + i, 25), { height, index: i, messageId: `b${i}`, timestamp: T0 + 50 });
     results.push(await g.apply(e, anyone));
   }
   eq(results.filter((r) => r.accepted).length, CONFIG.game.maxLaunchesPerBlock);
@@ -269,7 +444,7 @@ await check('two browsers folding the same log reach the same galaxy and the sam
 await check('garbage is refused, not fatal', async () => {
   const g = new Galaxy(CONFIG, ROUND);
   height += 1;
-  eq((await g.apply({ height, index: 0, messageId: 'x', timestamp: T0, bodyHex: 'ff00' }, anyone)).reason,
+  eq((await g.apply({ height, index: 0, messageId: 'x', timestamp: T0, session: true, body: null, author: null }, anyone)).reason,
     'not a move');
   eq((await g.apply(entry({ t: 'go', id: 'nobody' }, T0), anyone)).reason, 'not in this round');
 });
@@ -292,12 +467,11 @@ async function runMove(id, frames, { score, n = ++nonce, seed = SEED } = {}) {
   const encoded = encodeInputs(frames);
   const claimed = score ?? replay(fromHex(seed), frames).score;
   const sig = await c.sign(runStatement(ARCADE, FIELD, seed, id, n, inputsHash(encoded), claimed));
-  return { t: 'run', id, pub: c.pub, n, seed, inputs: toHex(encoded), score: claimed, sig };
+  return signedBy(c, { t: 'run', id, pub: c.pub, n, seed, inputs: toHex(encoded), score: claimed, sig });
 }
 const arcadeEntry = (move, timestamp, stateRoot = 'aa'.repeat(32)) => {
   height += 1;
-  return { height, index: 0, messageId: `a${height}`, timestamp, stateRoot,
-    bodyHex: toHex(utf8(JSON.stringify(move))) };
+  return sessionEntry(move, { height, index: 0, messageId: `a${height}`, timestamp, stateRoot });
 };
 async function openField() {
   const a = new Arcade(ARCADE, FIELD);
@@ -357,11 +531,11 @@ await check('a claimed score that the inputs do not reach is refused', async () 
   assert(/does not replay/.test(r.reason), r.reason);
   eq(a.leaderboard().length, 0);
 });
-await check('altered inputs break the signature; another field’s run is refused', async () => {
+await check('a run sent from another commander’s session is refused; so is another field’s run', async () => {
   const a = await openField();
   const move = await runMove('satya', pilot());
-  const tampered = { ...move, inputs: toHex(encodeInputs(pilot(3))) };
-  eq((await a.apply(arcadeEntry(tampered, F0 + 1000), anyone)).reason, 'run signature does not verify');
+  const stolen = signedBy(await commander('mallory'), move); // satya's run, re-sent by mallory's session
+  eq((await a.apply(arcadeEntry(stolen, F0 + 1000), anyone)).reason, 'run signature does not verify');
   const elsewhere = await runMove('satya', pilot(), { seed: 'cd'.repeat(16) });
   eq((await a.apply(arcadeEntry(elsewhere, F0 + 1001), anyone)).reason, 'played on another field');
 });
@@ -514,13 +688,16 @@ console.log('sealed duels');
 
 const D0 = 1_900_000_000_000;
 const lobbyNonce = new Map();
-async function lobbyMove(kind, id, fields, timestamp) {
+async function lobbyMove(kind, id, fields, timestamp, cfg = DUELS) {
   const c = await commander(id);
   const n = (lobbyNonce.get(id) ?? 0) + 1;
   lobbyNonce.set(id, n);
   const extra = kind === 'challenge' ? { rounds: fields } : { challenge: fields };
-  const sig = await c.sign(duelStatement(DUELS, 'lobby', kind, id, n, fields));
-  return entry({ t: kind, id, pub: c.pub, n, ...extra, sig }, timestamp);
+  const sig = await c.sign(duelStatement(cfg, 'lobby', kind, id, n, fields));
+  const move = { t: kind, id, pub: c.pub, n, ...extra, sig };
+  if (cfg.sessions) return entry(signedBy(c, move), timestamp);
+  height += 1;
+  return signedEntry(move, { height, index: 0, messageId: `m${height}`, timestamp });
 }
 async function duelMove(duelId, kind, id, round, fields, timestamp) {
   const c = await commander(id);
@@ -528,7 +705,7 @@ async function duelMove(duelId, kind, id, round, fields, timestamp) {
   const body = { t: kind, id, round, sig };
   if (kind === 'seal') body.hash = fields[0];
   if (kind === 'reveal') { body.move = fields[0]; body.secret = fields[1]; }
-  return entry(body, timestamp);
+  return entry(signedBy(c, body), timestamp);
 }
 async function openDuel(rounds = 5) {
   const lobby = new Lobby(DUELS);
@@ -565,14 +742,20 @@ await check('a challenge is accepted once; not by yourself, and not after it exp
     'the challenge expired');
 });
 await check('plugin edition: a call sign belongs to the first key that uses it on the duel chain', async () => {
-  const cfg = { ...DUELS, keyBinding: 'first-seen' };
+  const cfg = PLUGIN_CONFIG;
   const lobby = new Lobby(cfg);
-  assert((await lobby.apply(await lobbyMove('challenge', 'satya', 5, D0), anyone)).accepted);
+  assert((await lobby.apply(await lobbyMove('challenge', 'satya', 5, D0, cfg), anyone)).accepted);
   const mallory = await commander('mallory');
   const n = 99;
   const sig = await mallory.sign(duelStatement(cfg, 'lobby', 'challenge', 'satya', n, 5));
-  const impostor = entry({ t: 'challenge', id: 'satya', pub: mallory.pub, n, rounds: 5, sig }, D0 + 10);
-  eq((await lobby.apply(impostor, anyone)).reason, 'that call sign belongs to another key on this chain');
+  const move = { t: 'challenge', id: 'satya', pub: mallory.pub, n, rounds: 5, sig };
+  height += 1;
+  eq((await lobby.apply(signedEntry(move, { height, index: 0, messageId: `m${height}`, timestamp: D0 + 10 }), anyone)).reason,
+    'that call sign belongs to another key on this chain');
+  const forgedSig = signedEntry({ ...move, rounds: 7 }, { height: height + 1, index: 0, messageId: 'x', timestamp: D0 + 11 });
+  eq((await new Lobby(cfg).apply(forgedSig, anyone)).reason, 'signature does not verify');
+  // The browser edition: mallory's session may claim satya with mallory's key; the profile check refuses it.
+  const impostor = entry(signedBy(mallory, move), D0 + 12);
   assert((await new Lobby(DUELS).apply(impostor, anyone)).accepted, 'the browser edition leaves this to the profile check');
 });
 await check('a round: both seal, both reveal, damage and energy follow the table', async () => {
@@ -660,7 +843,7 @@ async function bet(id, comet, stake, race = RACE) {
   const c = await commander(id);
   const n = ++betNonce;
   const sig = await c.sign(betStatement(DERBY, DH, id, n, race, comet, stake));
-  return { t: 'bet', id, pub: c.pub, n, race, comet, stake, sig };
+  return signedBy(c, { t: 'bet', id, pub: c.pub, n, race, comet, stake, sig });
 }
 const rooted = (e, root) => ({ ...e, stateRoot: root });
 
@@ -739,7 +922,7 @@ async function seed(id, pattern, x, y, rot = 0) {
   const c = await commander(id);
   const n = ++reefNonce;
   const sig = await c.sign(seedStatement(REEF, XSEASON, id, n, pattern, x, y, rot));
-  return { t: 'seed', id, pub: c.pub, n, pattern, x, y, rot, sig };
+  return signedBy(c, { t: 'seed', id, pub: c.pub, n, pattern, x, y, rot, sig });
 }
 
 await check('the world rules: a blinker blinks, a glider glides, newborns take the majority species', () => {
@@ -831,12 +1014,12 @@ async function sonarLobby(kind, id, fleet, challenge) {
   const n = ++sonarNonce;
   const fields = kind === 'challenge' ? [n, fleet.root] : [n, challenge, fleet.root];
   const sig = await c.sign(sonarStatement(SONAR, 'lobby', kind, id, ...fields));
-  return { t: kind, id, pub: c.pub, n, root: fleet.root, ...(challenge ? { challenge } : {}), sig };
+  return signedBy(c, { t: kind, id, pub: c.pub, n, root: fleet.root, ...(challenge ? { challenge } : {}), sig });
 }
 async function sonarMove(battleId, kind, id, fields, body) {
   const c = await commander(id);
   const sig = await c.sign(sonarStatement(SONAR, battleId, kind, id, ...fields));
-  return { t: kind, id, ...body, sig };
+  return signedBy(c, { t: kind, id, ...body, sig });
 }
 const shot = (bid, id, k, cell) => sonarMove(bid, 'shot', id, [k, cell], { k, cell });
 const answer = (bid, id, k, a) => sonarMove(bid, 'answer', id, [k, a.cell, a.ship, a.salt], { k, cell: a.cell, ship: a.ship, salt: a.salt, path: a.path });
@@ -934,18 +1117,6 @@ console.log('neon rush');
 
 const MS = 2_000_000;
 const MT = MS * MOTO.seasonMs;
-MOTO.generationId = '11'.repeat(32);
-const motoIssuer = signerFromKey(await createSessionKey());
-const motoSession = signerFromKey(await createSessionKey());
-const motoDelegation = await issueDelegation({ chainId: MOTO.movesChain, generationId: MOTO.generationId,
-  delegate: motoSession.publicKey, scope: 'games/neon-rush/', notBefore: MT, notAfter: MT + 3600000, issuer: motoIssuer });
-async function motoEntry(move, timestamp, index = 0) {
-  const record = entry(move, timestamp, index);
-  record.bodyHex = hex(await signWrite({ chainId: MOTO.movesChain, generationId: MOTO.generationId,
-    topic: `games/neon-rush/s${MS}`, payload: encodeCanonicalValue(move),
-    nonce: record.height.toString(16).padStart(32, '0'), notAfter: MT + 3600000, delegation: motoDelegation }, [motoSession]));
-  return record;
-}
 const ride = (track, steer = rider) => { const r = new Ride(track); const f = []; while (!r.over) { const b = steer(r); f.push(b); r.step(b); } return { frames: Uint8Array.from(f), finished: r.finished }; };
 let rideNonce = 0;
 async function rideRun(id, circuit, frames, claimed, seed = circuit.seed) {
@@ -953,7 +1124,7 @@ async function rideRun(id, circuit, frames, claimed, seed = circuit.seed) {
   const encoded = encodeInputs(frames);
   const n = ++rideNonce;
   const sig = await c.sign(rideStatement(MOTO, MS, seed, id, n, rideHash(encoded), claimed));
-  return { t: 'run', id, pub: c.pub, n, seed, inputs: toHex(encoded), frames: claimed, sig };
+  return signedBy(c, { t: 'run', id, pub: c.pub, n, seed, inputs: toHex(encoded), frames: claimed, sig });
 }
 
 await check('the city circuit comes from the seed: the same seed gives the same circuit', () => {
@@ -977,24 +1148,24 @@ await check('a ride replays to the same frame; changed or cut inputs do not reac
 await check('the season: a run counts only if its inputs replay to the claimed time; splits show riders live', async () => {
   height = 50_000;
   const circuit = new Circuit(MOTO, MS);
-  const opened = await circuit.apply(rooted(await motoEntry({ t: 'open' }, MT + 1000), HROOT('d')), anyone);
+  const opened = await circuit.apply(rooted(entry({ t: 'open' }, MT + 1000), HROOT('d')), anyone);
   eq(opened.opened, true);
   const { frames, finished } = ride(circuit.track);
   const nova = await commander('nova');
   const splitSig = await nova.sign(splitStatement(MOTO, MS, 'nova', 1, 7, 3, 900));
-  assert((await circuit.apply(rooted(await motoEntry({ t: 'split', id: 'nova', pub: nova.pub, n: 1, run: 7, cp: 3, frame: 900, sig: splitSig }, MT + 2000), HROOT('e')), anyone)).accepted);
+  assert((await circuit.apply(rooted(entry({ t: 'split', id: 'nova', pub: nova.pub, n: 1, run: 7, cp: 3, frame: 900, sig: splitSig }, MT + 2000), HROOT('e')), anyone)).accepted);
   eq(circuit.liveRiders(MT + 3000).length, 1);
-  const faster = await circuit.apply(rooted(await motoEntry(await rideRun('nova', circuit, frames, finished - 60), MT + 3000), HROOT('f')), anyone);
+  const faster = await circuit.apply(rooted(entry(await rideRun('nova', circuit, frames, finished - 60), MT + 3000), HROOT('f')), anyone);
   eq(faster.accepted, false);
   assert(/does not replay/.test(faster.reason) || /bad inputs/.test(faster.reason), faster.reason);
   const honest = await rideRun('nova', circuit, frames, finished);
-  const r = await circuit.apply(rooted(await motoEntry(honest, MT + 4000), HROOT('g')), anyone);
+  const r = await circuit.apply(rooted(entry(honest, MT + 4000), HROOT('g')), anyone);
   assert(r.accepted, r.reason);
   eq(circuit.leaderboard()[0].frames, finished);
   eq(circuit.liveRiders(MT + 5000).length, 0, 'a finished rider is no longer live');
-  eq((await circuit.apply(rooted(await motoEntry(honest, MT + 5000), HROOT('h')), anyone)).reason, 'stale nonce (replayed)');
+  eq((await circuit.apply(rooted(entry(honest, MT + 5000), HROOT('h')), anyone)).reason, 'stale nonce (replayed)');
   const elsewhere = await rideRun('satya', circuit, frames, finished, '00'.repeat(16));
-  eq((await circuit.apply(rooted(await motoEntry(elsewhere, MT + 6000), HROOT('i')), anyone)).reason, 'ridden on another circuit');
+  eq((await circuit.apply(rooted(entry(elsewhere, MT + 6000), HROOT('i')), anyone)).reason, 'ridden on another circuit');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

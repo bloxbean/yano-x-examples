@@ -319,7 +319,7 @@ public final class BatchReleaseApp {
         System.out.println("Cardano L1 anchoring\n");
         if (status == null || status.isMissingNode() || !status.path("enabled").asBoolean(false)) {
             System.out.println("  Not enabled. Start with:");
-            System.out.println("    ./cluster start 3 --anchor-mode metadata");
+            System.out.println("    ./cluster start 3");
             return;
         }
         System.out.printf("  enabled           %s%n", status.path("enabled").asBoolean());
@@ -373,7 +373,7 @@ public final class BatchReleaseApp {
                 --via picks the member node that relays the command. It never changes
                 a decision — the actor signature does.
 
-                The chain must be running: ./cluster start 3 --anchor-mode metadata
+                The chain must be running: ./cluster start 3
                 """);
     }
 

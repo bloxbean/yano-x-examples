@@ -5,12 +5,14 @@
 // sees the same galaxy. Changing any of it is a new game version — change
 // `app` too, which changes every round's topic and map.
 
-import { CENTER } from '../../shared/config.js';
+import { CENTER, scopeOf } from '../../shared/config.js';
 
 export const CONFIG = {
   get nodes() { return CENTER.nodes; },
   get explorerTx() { return CENTER.explorerTx; },
   movesChain: CENTER.movesChain,
+  sessions: true, // moves are signed by the commander's session key (shared/sessions.js)
+  scope: scopeOf('galaxy'), // games/galaxy/: each round is a topic below it
   app: 'anchor-galaxy/v1',
 
   game: {

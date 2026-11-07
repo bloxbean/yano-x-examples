@@ -13,29 +13,30 @@
 // the end both reveal the whole board and secret, and every browser checks the
 // shapes. Deadlines run on certified block time.
 //
-// Lobby topic (one per hour):
-//   challenge {"t":"challenge","id","pub","n","root","sig"}           its message id is the battle id
-//   accept    {"t":"accept","id","pub","n","challenge","root","sig"}  the first valid accept wins
-// Battle topic (one per battle):
-//   shot      {"t":"shot","id","k","cell","sig"}
-//   answer    {"t":"answer","id","k","cell","ship","salt","path":[7 hashes],"sig"}
-//   reveal    {"t":"reveal","id","board":"<100 digits>","secret","sig"}
-//   forfeit   {"t":"forfeit","id","k","sig"}                          only advances block time
+// Lobby topic (one per hour, games/sonar/lobby.h<hour>):
+//   challenge {"t":"challenge","id","pub","n","root"}           its message id is the battle id
+//   accept    {"t":"accept","id","pub","n","challenge","root"}  the first valid accept wins
+// Battle topic (one per battle, games/sonar/d<battle id prefix>):
+//   shot      {"t":"shot","id","k","cell"}
+//   answer    {"t":"answer","id","k","cell","ship","salt","path":[7 hashes]}
+//   reveal    {"t":"reveal","id","board":"<100 digits>","secret"}
+//   forfeit   {"t":"forfeit","id","k"}                          only advances block time
+// Every message is signed by the player's session key for games/sonar/; your
+// page answers shots with your session key while you are away from the board.
 
 import { blake2b } from '../../shared/blake2b.js';
-import { ed25519Verify, fromHex, toHex, utf8 } from '../../shared/crypto.js';
+import { fromHex, toHex, utf8 } from '../../shared/crypto.js';
+import { authentic, moveBody, signatureShape } from '../../shared/moves.js';
 
 const CALLSIGN = /^[a-z0-9][a-z0-9_-]{2,19}$/;
 const HEX32 = /^[0-9a-f]{32}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
-const HEX128 = /^[0-9a-f]{128}$/;
 const LEAVES = 128;
 export const DEPTH = 7;
 
-const base = (cfg) => cfg.app.replace('/', '.');
 export const lobbyOf = (cfg, ts) => Math.floor(ts / cfg.lobbyMs);
-export const lobbyTopic = (cfg, hour) => `${base(cfg)}.lobby.h${hour}`;
-export const battleTopic = (cfg, battleId) => `${base(cfg)}.d${battleId.slice(0, 16)}`;
+export const lobbyTopic = (cfg, hour) => `${cfg.scope}lobby.h${hour}`;
+export const battleTopic = (cfg, battleId) => `${cfg.scope}d${battleId.slice(0, 16)}`;
 export const statement = (cfg, scope, kind, id, ...fields) => [cfg.app, cfg.movesChain, scope, kind, id, ...fields].join('|');
 
 // ------------------------------------------------------------------ commitments
@@ -128,9 +129,7 @@ export function validFleet(cfg, board) {
   });
 }
 
-const parse = (entry) => {
-  try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(fromHex(entry.bodyHex))); } catch { return null; }
-};
+const parse = (cfg, entry) => moveBody(cfg, entry);
 const reject = (reason) => ({ accepted: false, reason });
 
 // ------------------------------------------------------------------ lobby
@@ -150,7 +149,7 @@ export class Lobby {
     if (height < this.position.height || (height === this.position.height && index <= this.position.index)) {
       return { skipped: true };
     }
-    const b = parse(entry);
+    const b = parse(this.cfg, entry);
     let result = reject('not a lobby message');
     if (b && (b.t === 'challenge' || b.t === 'accept')) result = await this.#message(entry, b, profiles);
     this.position = { height, index };
@@ -161,11 +160,11 @@ export class Lobby {
     const { cfg } = this;
     if (typeof b.id !== 'string' || !CALLSIGN.test(b.id) || typeof b.pub !== 'string' || !HEX64.test(b.pub)
         || !Number.isSafeInteger(b.n) || b.n < 1 || typeof b.root !== 'string' || !HEX64.test(b.root)
-        || typeof b.sig !== 'string' || !HEX128.test(b.sig)) {
+        || !signatureShape(cfg, b)) {
       return reject('malformed');
     }
     const fields = b.t === 'challenge' ? [b.n, b.root] : [b.n, b.challenge, b.root];
-    if (!(await ed25519Verify(fromHex(b.pub), fromHex(b.sig), utf8(statement(cfg, 'lobby', b.t, b.id, ...fields))))) {
+    if (!(await authentic(cfg, entry, b, b.pub, statement(cfg, 'lobby', b.t, b.id, ...fields)))) {
       return reject('signature does not verify');
     }
     if (b.n <= (this.nonces.get(b.id) ?? 0)) return reject('stale nonce (replayed)');
@@ -270,16 +269,15 @@ export class Battle {
     this.position = { height, index };
     const expired = this.#expire(entry.timestamp);
     if (this.done) return { ...reject(expired ? 'after the battle ended' : 'the battle is over'), expired };
-    const b = parse(entry);
+    const b = parse(this.cfg, entry);
     const seat = b && typeof b.id === 'string' ? this.seat(b.id) : -1;
     if (seat < 0) return { ...reject('not a player in this battle'), expired };
-    const pub = fromHex(this.players[seat].pub);
-    const say = (kind, ...fields) => utf8(statement(this.cfg, this.battleId, kind, b.id, ...fields));
-    const sigOk = typeof b.sig === 'string' && HEX128.test(b.sig);
+    const pub = this.players[seat].pub;
+    const signed = (kind, ...fields) => authentic(this.cfg, entry, b, pub, statement(this.cfg, this.battleId, kind, b.id, ...fields));
     const ref = { height, index, messageId: entry.messageId, timestamp: entry.timestamp };
 
     if (b.t === 'forfeit') {
-      if (!sigOk || !Number.isSafeInteger(b.k) || !(await ed25519Verify(pub, fromHex(b.sig), say('forfeit', b.k)))) {
+      if (!Number.isSafeInteger(b.k) || !(await signed('forfeit', b.k))) {
         return { ...reject('bad forfeit claim'), expired };
       }
       return { accepted: true, kind: 'forfeit', seat, expired };
@@ -289,7 +287,7 @@ export class Battle {
       if (this.phase !== 'shot' || seat !== this.turn) return { ...reject('not your turn to fire'), expired };
       if (b.k !== this.k || !Number.isSafeInteger(b.cell) || b.cell < 0 || b.cell >= this.total) return { ...reject('malformed shot'), expired };
       if (this.known[1 - seat].has(b.cell)) return { ...reject('already fired at that cell'), expired };
-      if (!sigOk || !(await ed25519Verify(pub, fromHex(b.sig), say('shot', b.k, b.cell)))) return { ...reject('signature does not verify'), expired };
+      if (!(await signed('shot', b.k, b.cell))) return { ...reject('signature does not verify'), expired };
       this.pendingShot = { k: b.k, by: seat, cell: b.cell, shot: ref };
       this.phase = 'answer';
       this.since = entry.timestamp;
@@ -304,7 +302,7 @@ export class Battle {
           || !b.path.every((h) => typeof h === 'string' && HEX64.test(h))) {
         return { ...reject('malformed answer'), expired };
       }
-      if (!sigOk || !(await ed25519Verify(pub, fromHex(b.sig), say('answer', b.k, b.cell, b.ship, b.salt)))) {
+      if (!(await signed('answer', b.k, b.cell, b.ship, b.salt))) {
         return { ...reject('signature does not verify'), expired };
       }
       if (!verifyAnswer(this.cfg, this.players[seat].root, b.cell, b.ship, b.salt, b.path)) {
@@ -345,7 +343,7 @@ export class Battle {
       if (typeof b.board !== 'string' || !/^[0-9]{100}$/.test(b.board) || typeof b.secret !== 'string' || !HEX64.test(b.secret)) {
         return { ...reject('malformed reveal'), expired };
       }
-      if (!sigOk || !(await ed25519Verify(pub, fromHex(b.sig), say('reveal', b.board, b.secret)))) {
+      if (!(await signed('reveal', b.board, b.secret))) {
         return { ...reject('signature does not verify'), expired };
       }
       const board = [...b.board].map(Number);

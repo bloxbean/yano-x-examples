@@ -13,11 +13,13 @@ import { Ledger } from '../../shared/ledger.js';
 import { Session } from '../../shared/auth.js';
 import { ProofPanel, esc, reportReachability, toast } from '../../shared/ui.js';
 import { ed25519Supported, randomBytes, toHex } from '../../shared/crypto.js';
+import { connectMoves, showSession } from '../../shared/sessions.js';
 
 const $ = (id) => document.getElementById(id);
 const proxy = await applyProxy();
 const ledger = new Ledger(CONFIG, { proxy });
 const session = new Session(ledger);
+const moves = await connectMoves(ledger, CONFIG, session, () => render());
 const panel = new ProofPanel();
 const renderer = new Renderer($('sea'), CONFIG);
 $('back').href = withQuery('../');
@@ -77,7 +79,7 @@ async function syncLobby() {
     do {
       lobbyAgain = false;
       const from = lobby.position.height;
-      const lists = await Promise.all(lobbyTopics().map((t) => ledger.entriesFrom(CONFIG.movesChain, t, from)));
+      const lists = await Promise.all(lobbyTopics().map((t) => moves.entries(t, from)));
       const entries = lists.flat().sort((a, b) => a.height - b.height || a.index - b.index);
       for (const entry of entries) {
         let result;
@@ -118,9 +120,7 @@ async function postLobby(kind, extra, topic) {
   try {
     const n = nextNonce();
     const fields = kind === 'challenge' ? [n, f.root] : [n, extra.challenge, f.root];
-    const sig = await c.sign(statement(CONFIG, 'lobby', kind, c.id, ...fields));
-    const body = JSON.stringify({ t: kind, id: c.id, pub: c.pub, n, ...extra, root: f.root, sig });
-    const { messageId } = await ledger.submit(CONFIG.movesChain, session.relay, topic, { body });
+    const { messageId } = await moves.submit(c, session.relay, topic, { t: kind, id: c.id, pub: c.pub, n, ...extra, root: f.root });
     ui.pendingLobby.set(messageId, kind);
   } catch (error) {
     toast(`Could not ${kind}: ${error.message}`, 'info');
@@ -183,7 +183,7 @@ async function syncBattle() {
     do {
       battleAgain = false;
       const b = battle;
-      const entries = await ledger.entriesFrom(CONFIG.movesChain, battleTopic(CONFIG, b.battleId), b.position.height);
+      const entries = await moves.entries(battleTopic(CONFIG, b.battleId), b.position.height);
       for (const entry of entries) {
         if (b !== battle) return;
         const result = await b.apply(entry);
@@ -248,9 +248,7 @@ async function act() {
     if (ui.sent.has(key)) return;
     ui.sent.add(key);
     try {
-      const sig = await c.sign(statement(CONFIG, battleId, kind, c.id, ...fields));
-      await ledger.submit(CONFIG.movesChain, session.relay, battleTopic(CONFIG, battleId),
-        { body: JSON.stringify({ t: kind, id: c.id, ...body, sig }) });
+      await moves.submit(c, session.relay, battleTopic(CONFIG, battleId), { t: kind, id: c.id, ...body });
     } catch (error) {
       ui.sent.delete(key);
       toast(`Could not send: ${error.message}`, 'info');
@@ -280,9 +278,7 @@ async function fire(cell) {
   ui.sent.add(`shot:${k}`);
   ui.aim = cell;
   try {
-    const sig = await c.sign(statement(CONFIG, battleId, 'shot', c.id, k, cell));
-    await ledger.submit(CONFIG.movesChain, session.relay, battleTopic(CONFIG, battleId),
-      { body: JSON.stringify({ t: 'shot', id: c.id, k, cell, sig }) });
+    await moves.submit(c, session.relay, battleTopic(CONFIG, battleId), { t: 'shot', id: c.id, k, cell });
   } catch (error) {
     ui.sent.delete(`shot:${k}`);
     ui.aim = null;
@@ -338,6 +334,7 @@ function render() {
     $('avatar').textContent = c.id[0];
     $('me-name').textContent = c.id;
     $('me-key').textContent = `key ${c.pub.slice(0, 6)}…${c.pub.slice(-4)}`;
+    showSession($('me-key'), moves);
   }
   renderStatus();
   if (!battle) { $('vs').textContent = 'Lobby'; return; }
@@ -430,11 +427,11 @@ $('log').addEventListener('click', (e) => {
     <dl class="facts"><dt>Fired by</dt><dd>${esc(battle.players[r.by].id)} · block #${r.shot.height}</dd>
       <dt>Answer</dt><dd>${r.ship ? `hit — ${CONFIG.shipNames[r.ship - 1]}` : 'miss'} · block #${r.answer.height}</dd>
       <dt>Committed root</dt><dd class="mono">${battle.players[def].root}</dd></dl><div class="proof-out"></div>`);
-  panel.run(() => proveShot(CONFIG, ledger, battle, r, commitOf(def), { threshold: ui.status?.threshold ?? 1 }), `Shot ${r.k}`);
+  panel.run(() => proveShot(CONFIG, ledger, moves, battle, r, commitOf(def), { threshold: ui.status?.threshold ?? 1 }), `Shot ${r.k}`);
 });
 $('prove-battle').addEventListener('click', () => {
   panel.open(`Battle #${battleId.slice(0, 6)}…`, '<div class="proof-out"></div>');
-  panel.run(() => proveBattle(CONFIG, ledger, battle, { threshold: ui.status?.threshold ?? 1 }), 'The result');
+  panel.run(() => proveBattle(CONFIG, ledger, moves, battle, { threshold: ui.status?.threshold ?? 1 }), 'The result');
 });
 $('to-lobby').addEventListener('click', (e) => { e.preventDefault(); location.hash = ''; });
 $('relay').innerHTML = CONFIG.nodes.map((n, i) => `<option value="${i}">${esc(n.label)}</option>`).join('');

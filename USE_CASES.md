@@ -13,7 +13,7 @@ Status legend:
 | 🔜 | Planned next |
 | 💡 | Candidate, not scheduled |
 
-Runtime used by all examples: `yano-x-jvm-0.1.0-pre2` (Yano `0.1.0-pre15`),
+Runtime used by all examples: `yano-x-jvm-0.1.0-pre6` (Yano `0.1.0-pre19`),
 Java 25, local devnet — no public-network funds and no external Cardano node
 unless an example explicitly says so.
 

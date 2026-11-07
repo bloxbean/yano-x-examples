@@ -4,24 +4,22 @@
 // payout follows from the pool — and the bet and the beacon are recorded under
 // the root anchored on Cardano.
 
-import { ed25519Verify, fromHex, toHex, utf8 } from '../../shared/crypto.js';
-import { MESSAGE_SUBJECT, rootChecks, typedProof } from '../../shared/proofs.js';
-import { betStatement, raceClose, raceSeed, runRace } from './derby.js';
+import { toHex } from '../../shared/crypto.js';
+import { MESSAGE_SUBJECT, authorshipChecks, rootChecks, typedProof } from '../../shared/proofs.js';
+import { raceClose, raceSeed, runRace } from './derby.js';
 
 /** Prove race `rec` of `derby`, and `bet` (one of rec.bets) if given. */
-export async function proveRace(cfg, ledger, derby, rec, bet, { threshold } = {}) {
+export async function proveRace(cfg, ledger, moves, derby, rec, bet, { threshold } = {}) {
   const checks = [];
   const close = raceClose(cfg, rec.race);
   const beacon = rec.beacon;
   const names = cfg.comets.map((c) => c.name);
   if (bet) {
     const message = await ledger.message(cfg.movesChain, bet.messageId);
-    let body = null;
-    try { body = JSON.parse(new TextDecoder().decode(fromHex(message.bodyHex))); } catch { /* checked below */ }
-    const signed = !!body && await ed25519Verify(fromHex(body.pub), fromHex(body.sig),
-      utf8(betStatement(cfg, derby.hour, body.id, body.n, body.race, body.comet, body.stake)));
-    checks.push({ ok: signed && body.comet === bet.comet && body.stake === bet.stake,
-      text: `${bet.id} signed “${bet.stake} on ${names[bet.comet]}” with their commander key` });
+    const { checks: signed, body } = await authorshipChecks(moves, message, bet.id, derby.keys.get(bet.id));
+    checks.push(...signed);
+    checks.push({ ok: body?.comet === bet.comet && body?.stake === bet.stake,
+      text: `the signed move is “${bet.stake} on ${names[bet.comet]}”` });
     checks.push({ ok: bet.timestamp < close, text: `the bet was final at block #${bet.height}, ${((close - bet.timestamp) / 1000).toFixed(1)} s before betting closed` });
   }
   const block = await ledger.block(cfg.movesChain, beacon.height);

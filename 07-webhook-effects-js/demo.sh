@@ -74,8 +74,8 @@ cat <<'TXT'
 
 Two different scopes, and this is the crux of the configuration:
 
-  "reaching approval emits an effect"   consensus — every member, in the chain YAML
-  "and I am the one who performs it"    node-local — one member, in its own overlay
+  "reaching approval emits an effect"   consensus — every member, in the chain template
+  "and I am the one who performs it"    node-local — one member, in its own local.yaml
 
 If performing it were consensus config, three members would each call the ERP.
 TXT

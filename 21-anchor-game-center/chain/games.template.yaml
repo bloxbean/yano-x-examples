@@ -1,0 +1,53 @@
+# Anchor Games as an app-chain template. ./cluster turns it into a draft with
+# `yano.sh appchain new games --from chain/games.template.yaml`, then runs the
+# ordinary setup commands (request, seal, join, start) for three local members.
+#
+#   games-chain              the stock ordered-log machine: one state machine, every
+#                            browser-ruled game. Its topic registry protects the
+#                            games/ namespace: a move is accepted only when a player's
+#                            session key signs it, under a one-hour credential from
+#                            the game publisher's delegation service. Each round,
+#                            field, duel and season is its own topic under its game.
+#   authenticated-map-chain  commander profiles (and Land Rush claims) in the
+#                            owner-controlled `attachments` collection.
+#   duels-chain              the example's own sealed-duels machine (plugin/): the
+#                            members run the duel rules themselves.
+#
+# Every chain anchors in script mode: a Plutus V3 thread NFT whose datum chain the
+# validator enforces, co-signed by a threshold of members (./cluster start turns
+# it on from the lead; --no-anchor skips it).
+membership: governed
+sequencing: fixed
+chains:
+  - id: games-chain
+    recipe: audit-log
+    settings:
+      block.interval-ms: "1000"
+    anchor: {mode: script, every-blocks: 10}
+    topics:
+      create: members          # a top-level namespace (games/) is created by a member vote
+      unregistered: open       # topics outside a namespace stay open, so idle chains can heartbeat
+      limits:
+        max-delegation-ms: 3600000   # session credentials live at most an hour
+        activation-lag: 2            # registry changes take effect two blocks after they commit
+
+  - id: authenticated-map-chain
+    recipe: authenticated-map
+    settings:
+      block.interval-ms: "1000"
+    anchor: {mode: script, every-blocks: 10}
+    authenticatedMap:
+      profile: mpf-blake2b256-v1
+      anchorPolicyCommitment: "0000000000000000000000000000000000000000000000000000000000000000"
+      maxBatchItems: 32
+      maxBatchBytes: 65536
+      collections:
+        - {id: attachments, authorization: owner, maxKeyBytes: 64, maxValueBytes: 32768, valueEncoding: opaque}
+
+  - id: duels-chain
+    recipe: custom-plugin
+    answers:
+      stateMachine: "sealed-duels"
+    settings:
+      block.interval-ms: "1000"
+    anchor: {mode: script, every-blocks: 10}

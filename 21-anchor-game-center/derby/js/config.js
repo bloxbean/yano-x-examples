@@ -2,12 +2,14 @@
 // payout rules in derby.js depend on these; changing them, or `app`, is a new
 // game version.
 
-import { CENTER } from '../../shared/config.js';
+import { CENTER, scopeOf } from '../../shared/config.js';
 
 export const CONFIG = {
   get nodes() { return CENTER.nodes; },
   get explorerTx() { return CENTER.explorerTx; },
   movesChain: CENTER.movesChain,
+  sessions: true, // moves are signed by the commander's session key (shared/sessions.js)
+  scope: scopeOf('derby'), // each hour is a topic below it
   app: 'comet-derby/v1',
 
   hourMs: 60 * 60_000, // one topic and one set of balances per hour

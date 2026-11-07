@@ -14,8 +14,8 @@
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.release>25</maven.compiler.release>
-    <yano.x.version>0.1.0-pre2</yano.x.version>
-    <yano.version>0.1.0-pre15</yano.version>
+    <yano.x.version>0.1.0-pre6</yano.x.version>
+    <yano.version>0.1.0-pre19</yano.version>
     <junit.version>5.11.3</junit.version>
   </properties>
 

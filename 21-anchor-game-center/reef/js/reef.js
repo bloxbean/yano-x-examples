@@ -10,9 +10,10 @@
 // page can travel back to any moment and every browser gets the same picture
 // and the same world hash.
 //
-// One topic per season (CONFIG.seasonMs):
-//   open  {"t":"open"}                                         anyone
-//   seed  {"t":"seed","id","pub","n","pattern","x","y","rot","sig"}
+// One topic per season (CONFIG.seasonMs), games/reef/s<season>:
+//   open  {"t":"open"}                                     anyone
+//   seed  {"t":"seed","id","pub","n","pattern","x","y","rot"}
+// Every message is signed by a player's session key for games/reef/.
 //
 // The season's first message opens it: its block's certified time is
 // generation 0, and BLAKE2b of its state root seeds the primordial soup, so
@@ -20,12 +21,12 @@
 // checked against their profile on the authenticated-map chain.
 
 import { blake2b } from '../../shared/blake2b.js';
-import { ed25519Verify, fromHex, toHex, utf8 } from '../../shared/crypto.js';
+import { fromHex, toHex, utf8 } from '../../shared/crypto.js';
+import { authentic, moveBody, signatureShape } from '../../shared/moves.js';
 import { rng } from '../../shared/rng.js';
 
 const CALLSIGN = /^[a-z0-9][a-z0-9_-]{2,19}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
-const HEX128 = /^[0-9a-f]{128}$/;
 export const WILD = 7;
 
 const GUN = [[24, 0], [22, 1], [24, 1], [12, 2], [13, 2], [20, 2], [21, 2], [34, 2], [35, 2], [11, 3], [15, 3], [20, 3],
@@ -42,7 +43,7 @@ export const PATTERNS = {
 };
 
 export const seasonOf = (cfg, ts) => Math.floor(ts / cfg.seasonMs);
-export const seasonTopic = (cfg, season) => `${cfg.app.replace('/', '.')}.s${season}`;
+export const seasonTopic = (cfg, season) => `${cfg.scope}s${season}`;
 export const seasonSeed = (cfg, season, stateRoot) => blake2b(utf8(`${cfg.app}|soup|${season}|${stateRoot}`), 16);
 export const seedStatement = (cfg, season, id, n, pattern, x, y, rot) =>
   [cfg.app, cfg.movesChain, season, 'seed', id, n, pattern, x, y, rot].join('|');
@@ -156,7 +157,7 @@ export class Reef {
   }
 
   /**
-   * Apply one finalized message: { height, index, messageId, timestamp, stateRoot, bodyHex }.
+   * Apply one finalized message: { height, index, messageId, timestamp, stateRoot, body, author } (shared/moves.js).
    * `profiles(id, pub, ts)` answers { ok } / { ok: false, reason }, or throws to retry.
    */
   async apply(entry, profiles) {
@@ -174,8 +175,7 @@ export class Reef {
           seed: toHex(seasonSeed(this.cfg, this.season, entry.stateRoot)) };
         opened = true;
       }
-      let body;
-      try { body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(fromHex(entry.bodyHex))); } catch { body = null; }
+      const body = moveBody(this.cfg, entry);
       if (body?.t === 'open') result = { accepted: true, kind: 'open', opened };
       else if (body?.t === 'seed') result = { ...(await this.#seed(entry, body, profiles)), opened };
       else result = { ...reject('not a move'), opened };
@@ -190,11 +190,11 @@ export class Reef {
         || !Number.isSafeInteger(b.n) || b.n < 1 || typeof b.pattern !== 'string' || !Object.hasOwn(PATTERNS, b.pattern)
         || !Number.isSafeInteger(b.x) || !Number.isSafeInteger(b.y) || !Number.isSafeInteger(b.rot)
         || b.x < 0 || b.x >= cfg.width || b.y < 0 || b.y >= cfg.height || b.rot < 0 || b.rot > 3
-        || typeof b.sig !== 'string' || !HEX128.test(b.sig)) {
+        || !signatureShape(cfg, b)) {
       return reject('malformed placement');
     }
     const statement = seedStatement(cfg, this.season, b.id, b.n, b.pattern, b.x, b.y, b.rot);
-    if (!(await ed25519Verify(fromHex(b.pub), fromHex(b.sig), utf8(statement)))) return reject('signature does not verify');
+    if (!(await authentic(cfg, entry, b, b.pub, statement))) return reject('signature does not verify');
     if (b.n <= (this.nonces.get(b.id) ?? 0)) return reject('stale nonce (replayed)');
     const gen = this.genAt(entry.timestamp);
     if (gen > this.lastGen) return reject('the season is over');

@@ -26,11 +26,13 @@ Refusal codes: `MALFORMED`, `WRONG_TOPIC`, `NOT_A_MOVE`, `BAD_SIGNATURE`,
 `NOT_IN_DUEL`, `DUEL_OVER`, `WRONG_ROUND`, `SEALING_CLOSED`, `ALREADY_SEALED`,
 `NOTHING_TO_REVEAL`, `ALREADY_REVEALED`, `REVEAL_MISMATCH`.
 
-On a host from Yano 0.1.0-pre17 a refused submission gets HTTP 400 with the
-code. An older host (the 0.1.0-pre2 distribution runs 0.1.0-pre15) accepts the
-submission with 202, and the proposer drops the move when it builds the block,
-so it never reaches the log. The page asks `admit` first, so players see the
-code either way.
+A refused submission gets HTTP 400 with the code (hosts from Yano
+0.1.0-pre17; Yano X 0.1.0-pre6 runs 0.1.0-pre19). The page asks `admit` first,
+so players see the code before anything is sent.
+
+This edition keeps the commander's own signature on every move, and the plugin
+checks it itself; `duels-chain` has no topic policies. The browser edition on
+`games-chain` signs moves with a session key instead (see the main README).
 
 State keys (UTF-8):
 
@@ -86,19 +88,19 @@ node --no-warnings ../test/duel-vectors.mjs   # regenerate src/test/resources/du
 
 Sign the catalog and runtime manifest, then rebuild so the signature is inside
 the JAR. Keep the 32-byte publisher seed as 64 hex characters, outside the
-repository. The local example keeps one in the git-ignored `../.yano/`:
+repository and outside `../.yano/` (which `./cluster clean` deletes):
 
 ```bash
-D=../../yano-x-jvm-0.1.0-pre2
+D=../../yano-x-jvm-0.1.0-pre6
 R=src/main/resources/META-INF/yano
-$D/yano.sh appchain plugin sign --catalog $R/appchain-component-catalog-v1.json \
-  --runtime-manifest $R/plugins/plugin-bundle.sealed-duels.json \
-  --seed-file ../.yano/plugin-publisher.seed --key-id examples-duels-2026 \
-  --output $R/appchain-component-catalog-v1.sig.json
+KEYS=~/.config/anchor-games                     # plugin-publisher.seed (0600) and plugin-publisher.trust
+$D/yano.sh appchain plugin sign --catalog $PWD/$R/appchain-component-catalog-v1.json \
+  --runtime-manifest $PWD/$R/plugins/plugin-bundle.sealed-duels.json \
+  --seed-file $KEYS/plugin-publisher.seed --key-id examples-duels-2026 \
+  --output $PWD/$R/appchain-component-catalog-v1.sig.json
 ./gradlew build
-$D/yano.sh appchain plugin validate build/libs/sealed-duels-yano-plugin.jar \
-  --trust-key "$(cat ../.yano/plugin-publisher.trust)"
-$D/tools/yano-plugins/bin/yano-plugins validate build/libs/sealed-duels-yano-plugin.jar
+$D/yano.sh appchain plugin validate $PWD/build/libs/sealed-duels-yano-plugin.jar \
+  --trust-key "$(cat $KEYS/plugin-publisher.trust)"
 ```
 
 The signature covers the catalog, the runtime manifest and the publisher key

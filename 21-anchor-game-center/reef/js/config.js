@@ -1,12 +1,14 @@
 // Reef's settings, on top of what the game center shares. The world rules in
 // reef.js depend on these; changing them, or `app`, is a new game version.
 
-import { CENTER } from '../../shared/config.js';
+import { CENTER, scopeOf } from '../../shared/config.js';
 
 export const CONFIG = {
   get nodes() { return CENTER.nodes; },
   get explorerTx() { return CENTER.explorerTx; },
   movesChain: CENTER.movesChain,
+  sessions: true, // moves are signed by the commander's session key (shared/sessions.js)
+  scope: scopeOf('reef'), // each season is a topic below it
   app: 'ledger-reef/v1',
 
   seasonMs: 20 * 60_000, // a new reef every 20 minutes, aligned to the epoch

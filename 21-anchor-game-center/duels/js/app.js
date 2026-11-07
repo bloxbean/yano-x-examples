@@ -2,10 +2,13 @@
 // lobby and the open duel in step with the ledger, keeps your secrets on this
 // device until you reveal them, and draws the arena.
 //
-// The plugin edition (?engine=plugin) plays the same game on duels-chain,
-// where the members run the rules (plugin/). The page then asks the members'
-// rules before sending a move, reads each duel's committed record, checks it
-// against its own replay, and proves the record against the Cardano anchor.
+// The browser edition plays on games-chain under games/duels/: every move is
+// signed by the player's session key (shared/sessions.js). The plugin edition
+// (?engine=plugin) plays the same game on duels-chain, where the members run
+// the rules (plugin/) and check the commander's own signature on each move. The
+// page then asks the members' rules before sending a move, reads each duel's
+// committed record, checks it against its own replay, and proves the record
+// against the Cardano anchor.
 
 import { CONFIG } from './config.js';
 import { Duel, Lobby, duelTopic, lobbyOf, lobbyTopic, sealHash, statement } from './duels.js';
@@ -16,11 +19,13 @@ import { Ledger } from '../../shared/ledger.js';
 import { Session } from '../../shared/auth.js';
 import { ProofPanel, esc, reportReachability, toast } from '../../shared/ui.js';
 import { ed25519Supported, randomBytes, toHex } from '../../shared/crypto.js';
+import { connectMoves, showSession } from '../../shared/sessions.js';
 
 const $ = (id) => document.getElementById(id);
 const proxy = await applyProxy();
 const ledger = new Ledger(CONFIG, { proxy });
 const session = new Session(ledger);
+const moves = await connectMoves(ledger, CONFIG, session, () => renderSide());
 const panel = new ProofPanel();
 const arena = new Arena($('arena'), CONFIG);
 $('back').href = withQuery('../');
@@ -52,12 +57,14 @@ const secretKey = (round) => `${CONFIG.app}:${duelId}:${round}`;
 // ---------------------------------------------------------------- submit
 
 /**
- * Send a move. The plugin edition first asks the members' rules (the
- * read-only `admit` query on committed state): a refused move is never sent.
- * Hosts from Yano 0.1.0-pre17 also refuse at submit, with HTTP 400 and the
- * code; older hosts drop a refused move when building the block.
+ * Send a move. The browser edition frames it with the session key. The plugin
+ * edition first asks the members' rules (the read-only `admit` query on
+ * committed state): a refused move is never sent. Hosts from Yano 0.1.0-pre17
+ * also refuse at submit, with HTTP 400 and the code.
  */
-async function submit(topic, body) {
+async function submit(topic, move) {
+  if (!PLUGIN) return moves.submit(session.commander, session.relay, topic, move);
+  const body = JSON.stringify(move);
   if (PLUGIN) {
     const verdict = JSON.parse((await ledger.query(CONFIG.movesChain, 'admit', `${topic}\n${body}`)).payload);
     if (!verdict.accepted) throw refusal(verdict.code, verdict.reason);
@@ -70,6 +77,11 @@ async function submit(topic, body) {
     if (PLUGIN && answer) throw refusal(answer.code ?? answer.reason ?? 'REFUSED', answer.error ?? answer.reason ?? '');
     throw error;
   }
+}
+
+/** The plugin edition's members check the commander's own signature, `sig`; the browser edition needs none. */
+async function withSig(c, move, ...fields) {
+  return PLUGIN ? { ...move, sig: await c.sign(statement(CONFIG, ...fields)) } : move;
 }
 
 function refusal(code, reason) {
@@ -98,7 +110,7 @@ async function syncLobby() {
     do {
       lobbyAgain = false;
       const from = lobby.position.height;
-      const lists = await Promise.all(lobbyTopics().map((t) => ledger.entriesFrom(CONFIG.movesChain, t, from)));
+      const lists = await Promise.all(lobbyTopics().map((t) => moves.entries(t, from)));
       const entries = lists.flat().sort((a, b) => a.height - b.height || a.index - b.index);
       for (const entry of entries) {
         let result;
@@ -155,9 +167,8 @@ async function postChallenge() {
   const rounds = Number($('rounds').value);
   try {
     const n = nextNonce();
-    const sig = await c.sign(statement(CONFIG, 'lobby', 'challenge', c.id, n, rounds));
-    const body = JSON.stringify({ t: 'challenge', id: c.id, pub: c.pub, n, rounds, sig });
-    const { messageId } = await submit(lobbyTopic(CONFIG, lobbyOf(CONFIG, Date.now())), body);
+    const move = await withSig(c, { t: 'challenge', id: c.id, pub: c.pub, n, rounds }, 'lobby', 'challenge', c.id, n, rounds);
+    const { messageId } = await submit(lobbyTopic(CONFIG, lobbyOf(CONFIG, Date.now())), move);
     ui.pendingLobby.set(messageId, 'challenge');
   } catch (error) {
     toast(`Could not post the challenge: ${error.message}`, 'info');
@@ -170,9 +181,8 @@ async function accept(id) {
   const challenge = lobby.challenges.get(id);
   try {
     const n = nextNonce();
-    const sig = await c.sign(statement(CONFIG, 'lobby', 'accept', c.id, n, id));
-    const body = JSON.stringify({ t: 'accept', id: c.id, pub: c.pub, n, challenge: id, sig });
-    const { messageId } = await submit(lobbyTopic(CONFIG, lobbyOf(CONFIG, challenge.timestamp)), body);
+    const move = await withSig(c, { t: 'accept', id: c.id, pub: c.pub, n, challenge: id }, 'lobby', 'accept', c.id, n, id);
+    const { messageId } = await submit(lobbyTopic(CONFIG, lobbyOf(CONFIG, challenge.timestamp)), move);
     ui.pendingLobby.set(messageId, 'accept');
   } catch (error) {
     toast(`Could not accept: ${error.message}`, 'info');
@@ -239,7 +249,7 @@ async function syncDuel() {
     do {
       duelAgain = false;
       const d = duel;
-      const entries = await ledger.entriesFrom(CONFIG.movesChain, duelTopic(CONFIG, d.duelId), d.position.height);
+      const entries = await moves.entries(duelTopic(CONFIG, d.duelId), d.position.height);
       for (const entry of entries) {
         if (d !== duel) return;
         const result = await d.apply(entry);
@@ -303,12 +313,12 @@ async function act() {
   const seat = mySeat();
   if (!duel || !c || seat < 0 || duel.done) return;
   const r = duel.round;
-  const sign = (kind, ...fields) => c.sign(statement(CONFIG, duelId, kind, c.id, r, ...fields));
-  const send = async (key, body) => {
+  const signed = (move, kind, ...fields) => withSig(c, move, duelId, kind, c.id, r, ...fields);
+  const send = async (key, move) => {
     if (ui.sent.has(key)) return;
     ui.sent.add(key);
     try {
-      await submit(duelTopic(CONFIG, duelId), JSON.stringify(body));
+      await submit(duelTopic(CONFIG, duelId), move);
     } catch (error) {
       if (!error.refused) ui.sent.delete(key); // a refusal is final: do not resend it
       toast(`Could not send: ${error.message}`, 'info');
@@ -317,11 +327,11 @@ async function act() {
   if (duel.phase === 'reveal' && !duel.reveals[seat]) {
     let saved = null;
     try { saved = JSON.parse(localStorage.getItem(secretKey(r)) ?? 'null'); } catch { /* none */ }
-    if (saved) await send(`${r}:reveal`, { t: 'reveal', id: c.id, round: r, move: saved.move, secret: saved.secret, sig: await sign('reveal', saved.move, saved.secret) });
+    if (saved) await send(`${r}:reveal`, await signed({ t: 'reveal', id: c.id, round: r, move: saved.move, secret: saved.secret }, 'reveal', saved.move, saved.secret));
   }
   const deadline = duel.deadline();
   if (deadline && Date.now() > deadline + 1500) {
-    await send(`${r}:${duel.phase}:forfeit`, { t: 'forfeit', id: c.id, round: r, sig: await sign('forfeit') });
+    await send(`${r}:${duel.phase}:forfeit`, await signed({ t: 'forfeit', id: c.id, round: r }, 'forfeit'));
   }
 }
 
@@ -333,11 +343,11 @@ async function seal() {
   const secret = toHex(randomBytes(16));
   try { localStorage.setItem(secretKey(r), JSON.stringify({ move: ui.chosen, secret })); } catch { /* reveal needs this tab */ }
   const hash = sealHash(CONFIG, duelId, r, c.id, ui.chosen, secret);
-  const sig = await c.sign(statement(CONFIG, duelId, 'seal', c.id, r, hash));
+  const move = await withSig(c, { t: 'seal', id: c.id, round: r, hash }, duelId, 'seal', c.id, r, hash);
   ui.sent.add(`${r}:seal`);
   ui.sealSubmitted = performance.now();
   try {
-    await submit(duelTopic(CONFIG, duelId), JSON.stringify({ t: 'seal', id: c.id, round: r, hash, sig }));
+    await submit(duelTopic(CONFIG, duelId), move);
   } catch (error) {
     ui.sent.delete(`${r}:seal`);
     toast(`Could not seal: ${error.message}`, 'info');
@@ -413,7 +423,7 @@ async function openDuelProof() {
       <dt>Rules</dt><dd>run by the members (<code>sealed-duels</code>), not replayed here</dd>
     </dl>
     <div class="proof-out"></div>`);
-  panel.run(() => proveDuel(CONFIG, ledger, duel, { threshold: ui.status?.threshold ?? 1 }), `Duel #${duelId.slice(0, 6)}…`);
+  panel.run(() => proveDuel(CONFIG, ledger, moves, duel, { threshold: ui.status?.threshold ?? 1 }), `Duel #${duelId.slice(0, 6)}…`);
 }
 
 // ---------------------------------------------------------------- panels
@@ -517,6 +527,7 @@ function renderSide() {
     $('avatar').textContent = c.id[0];
     $('me-name').textContent = c.id;
     $('me-key').textContent = `key ${c.pub.slice(0, 6)}…${c.pub.slice(-4)}`;
+    showSession($('me-key'), moves);
   }
 }
 
@@ -545,7 +556,7 @@ function openRound(n) {
       <dt>Die</dt><dd>${record.die ?? '— (a forfeit means no shared die)'}</dd>
     </dl>
     <div class="proof-out"></div>`);
-  panel.run(() => proveRound(CONFIG, ledger, duel, record, { threshold: ui.status?.threshold ?? 1 }), `Round ${n}`);
+  panel.run(() => proveRound(CONFIG, ledger, moves, duel, record, { threshold: ui.status?.threshold ?? 1 }), `Round ${n}`);
 }
 
 // ---------------------------------------------------------------- input

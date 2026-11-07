@@ -11,30 +11,32 @@
 // Math.random. The map comes from BLAKE2b of the round number. Time is
 // certified block time; fleet arrivals between blocks are computed exactly.
 //
-// A round is a fixed window of block time; moves go on a per-round topic:
+// A round is a fixed window of block time; moves go on a per-round topic,
+// games/galaxy/r<round>, under the game's protected registry entry:
 //
-//   join  {"t":"join","id","pub","n","sig"}             claim a home planet
-//   go    {"t":"go","id","n","from","to","pct","sig"}   launch a fleet
+//   join  {"t":"join","id","pub","n"}             claim a home planet
+//   go    {"t":"go","id","n","from","to","pct"}   launch a fleet
 //
-// `sig` is the commander's Ed25519 signature over moveStatement(...). Every
-// planet remembers the finalized move that took it (`taken`), so a capture
-// can be proven later against the Cardano anchor. Joins
-// are also checked against the commander's profile on the authenticated-map
-// chain (see Profiles in app.js): the key must match and the profile must
-// have been registered before the join.
+// Each move is signed by the commander's session key (shared/sessions.js);
+// a move counts only if its verified author is the commander it names
+// (shared/moves.js). Every planet remembers the finalized move that took it
+// (`taken`), so a capture can be proven later against the Cardano anchor.
+// Joins are also checked against the commander's profile on the
+// authenticated-map chain (see Profiles in app.js): the key must match and
+// the profile must have been registered before the join.
 
 import { blake2b } from '../../shared/blake2b.js';
-import { ed25519Verify, fromHex, utf8 } from '../../shared/crypto.js';
+import { utf8 } from '../../shared/crypto.js';
+import { authentic, moveBody, signatureShape } from '../../shared/moves.js';
 
 export const roundOf = (cfg, ts) => Math.floor(ts / cfg.game.roundMs);
 export const roundStart = (cfg, round) => round * cfg.game.roundMs;
-export const roundTopic = (cfg, round) => `${cfg.app.replace('/', '.')}.r${round}`;
+export const roundTopic = (cfg, round) => `${cfg.scope}r${round}`;
 export const moveStatement = (cfg, round, kind, id, n, fields) =>
   [cfg.app, cfg.movesChain, round, kind, id, n, ...fields].join('|');
 
 const CALLSIGN = /^[a-z0-9][a-z0-9_-]{2,19}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
-const HEX128 = /^[0-9a-f]{128}$/;
 const PRODUCTION = [0, 900, 1400, 2000]; // thousandths of a ship per second, by planet size
 const CAP = [0, 80, 140, 200]; // production stops at this many ships
 const NEUTRAL_HOME_GARRISON = 20;
@@ -172,7 +174,7 @@ export class Galaxy {
   }
 
   /**
-   * Apply one finalized move: { height, index, messageId, timestamp, bodyHex }.
+   * Apply one finalized move: { height, index, messageId, timestamp, body, author } (shared/moves.js).
    * `profiles(id, pub, timestamp)` checks a joining commander and answers
    * { ok } or { ok: false, reason }; it throws to say "ask again later", in
    * which case nothing is applied and the same entry must be retried.
@@ -182,12 +184,7 @@ export class Galaxy {
     const at = this.s.position;
     if (height < at.height || (height === at.height && index <= at.index)) return { skipped: true };
 
-    let body;
-    try {
-      body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(fromHex(entry.bodyHex)));
-    } catch {
-      body = null;
-    }
+    const body = moveBody(this.cfg, entry);
     let result;
     if (timestamp < this.start || timestamp >= this.end) result = reject('outside this round');
     else if (body?.t === 'join') result = await this.#join(entry, body, profiles);
@@ -202,11 +199,10 @@ export class Galaxy {
   async #join(entry, b, profiles) {
     const { cfg } = this;
     if (typeof b.id !== 'string' || !CALLSIGN.test(b.id) || typeof b.pub !== 'string' || !HEX64.test(b.pub)
-        || !Number.isSafeInteger(b.n) || b.n < 1 || typeof b.sig !== 'string' || !HEX128.test(b.sig)) {
+        || !Number.isSafeInteger(b.n) || b.n < 1 || !signatureShape(cfg, b)) {
       return reject('malformed join');
     }
-    if (!(await ed25519Verify(fromHex(b.pub), fromHex(b.sig),
-      utf8(moveStatement(cfg, this.round, 'join', b.id, b.n, [b.pub]))))) {
+    if (!(await authentic(cfg, entry, b, b.pub, moveStatement(cfg, this.round, 'join', b.id, b.n, [b.pub])))) {
       return reject('join signature does not verify');
     }
     if (this.player(b.id)) return reject('already in this round');
@@ -235,12 +231,11 @@ export class Galaxy {
     if (!player) return reject('not in this round');
     const n = this.s.planets.length;
     if (!Number.isSafeInteger(b.n) || !isInt(b.from, n) || !isInt(b.to, n) || b.from === b.to
-        || !g.ratios.includes(b.pct) || typeof b.sig !== 'string' || !HEX128.test(b.sig)) {
+        || !g.ratios.includes(b.pct) || !signatureShape(cfg, b)) {
       return reject('malformed launch');
     }
     if (b.n <= player.n) return reject('stale nonce (replayed)');
-    if (!(await ed25519Verify(fromHex(player.pub), fromHex(b.sig),
-      utf8(moveStatement(cfg, this.round, 'go', b.id, b.n, [b.from, b.to, b.pct]))))) {
+    if (!(await authentic(cfg, entry, b, player.pub, moveStatement(cfg, this.round, 'go', b.id, b.n, [b.from, b.to, b.pct])))) {
       return reject('launch signature does not verify');
     }
     player.n = b.n; // a verified move burns its nonce even if refused below

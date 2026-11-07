@@ -12,13 +12,33 @@ export const CENTER = {
     { label: 'Member 4', url: 'https://node4-showcase.yano-x.io' },
   ],
   explorerTx: 'https://preprod.cardanoscan.io/transaction/{tx}',
-  // Game moves: the stock ordered-log machine. Each game uses its own topics.
-  movesChain: 'orders-chain',
+  // Game moves: the stock ordered-log machine, one chain for every browser-ruled
+  // game. Its topic registry protects games/: each game has its own entry
+  // (games/galaxy/, …) and every round, field, duel or season is a topic below
+  // it. Moves are signed by a player's session key (shared/sessions.js).
+  movesChain: 'games-chain',
   // Sealed Duels' plugin edition: the example's own state machine (plugin/),
   // which runs the duel rules on the members. Not on the showcase until it is
   // installed there (README: "Adding duels-chain to the showcase").
   duelsChain: 'duels-chain',
 };
+
+// games-chain's registry: the games/ namespace (created by a member vote, owned
+// by the game publisher) and one entry per game below it (signed by the
+// publisher). An entry's topics inherit games/'s writer policy — the publisher's
+// issuer, which delegates one-hour session keys — and set their own payload
+// limit. ./cluster start registers these; the delegation service issues
+// credentials for exactly these scopes.
+export const TOPIC_ENTRIES = [
+  { game: 'galaxy', scope: 'games/galaxy/', maxPayloadBytes: 2048 },
+  { game: 'arcade', scope: 'games/arcade/', maxPayloadBytes: 40000 }, // a run carries up to 32 KB of inputs
+  { game: 'duels', scope: 'games/duels/', maxPayloadBytes: 2048 },
+  { game: 'derby', scope: 'games/derby/', maxPayloadBytes: 2048 },
+  { game: 'reef', scope: 'games/reef/', maxPayloadBytes: 2048 },
+  { game: 'sonar', scope: 'games/sonar/', maxPayloadBytes: 4096 }, // an answer carries a 7-hash Merkle path
+  { game: 'moto', scope: 'games/neon-rush/', maxPayloadBytes: 40000 }, // a ride carries up to 32 KB of inputs
+];
+export const scopeOf = (game) => TOPIC_ENTRIES.find((e) => e.game === game).scope;
 
 // One commander, every game. Profiles live in the stock authenticated-map
 // machine's owner-controlled `attachments` collection. The namespace keeps the

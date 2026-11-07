@@ -4,31 +4,34 @@
 // the moves chain and its own rocks:
 //
 //   open  {"t":"open"}                                   anyone; seeds the field
-//   run   {"t":"run","id","pub","n","seed","inputs","score","sig"}
+//   run   {"t":"run","id","pub","n","seed","inputs","score"}
+
+// Each field's topic is games/arcade/f<field>, under the game's protected
+// registry entry; every message is signed by a player's session key.
 //
 // The field's seed is BLAKE2b of the state root of the block that finalized
 // the field's first message. Nobody knows that root before the block exists,
 // so nobody can practise a field before it opens — and everyone agrees on it.
 //
 // A run carries the player's inputs (run-length encoded) and the score they
-// saw, signed by their commander key. Every browser replays the inputs on the
+// saw, signed by their session key for this game. Every browser replays the inputs on the
 // field's seed; the run counts only if the replay reaches exactly the claimed
 // score. The leaderboard is therefore whatever the replays say, not whatever
 // anyone claims. Commanders are checked against their profile on the
 // authenticated-map chain, as in Anchor Galaxy (shared/profiles.js).
 
 import { blake2b } from '../../shared/blake2b.js';
-import { ed25519Verify, fromHex, toHex, utf8 } from '../../shared/crypto.js';
+import { fromHex, toHex, utf8 } from '../../shared/crypto.js';
+import { authentic, moveBody, signatureShape } from '../../shared/moves.js';
 import { RUN_FRAMES, replay } from './sim.js';
 
 const CALLSIGN = /^[a-z0-9][a-z0-9_-]{2,19}$/;
 const HEX32 = /^[0-9a-f]{32}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
-const HEX128 = /^[0-9a-f]{128}$/;
 const MAX_INPUT_HEX = 32_768;
 
 export const fieldOf = (cfg, ts) => Math.floor(ts / cfg.fieldMs);
-export const fieldTopic = (cfg, field) => `${cfg.app.replace('/', '.')}.f${field}`;
+export const fieldTopic = (cfg, field) => `${cfg.scope}f${field}`;
 export const fieldSeed = (cfg, field, stateRoot) => toHex(blake2b(utf8(`${cfg.app}|field|${field}|${stateRoot}`), 16));
 export const inputsHash = (encoded) => toHex(blake2b(encoded, 32));
 export const runStatement = (cfg, field, seed, id, n, hash, score) =>
@@ -85,7 +88,7 @@ export class Arcade {
   }
 
   /**
-   * Apply one finalized message: { height, index, messageId, timestamp, stateRoot, bodyHex }.
+   * Apply one finalized message: { height, index, messageId, timestamp, stateRoot, body, author } (shared/moves.js).
    * `profiles(id, pub, timestamp)` answers { ok } or { ok: false, reason }, or
    * throws to say "ask again later" — then nothing changes and the same entry
    * must be retried.
@@ -95,12 +98,7 @@ export class Arcade {
     if (height < this.position.height || (height === this.position.height && index <= this.position.index)) {
       return { skipped: true };
     }
-    let body;
-    try {
-      body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(fromHex(entry.bodyHex)));
-    } catch {
-      body = null;
-    }
+    const body = moveBody(this.cfg, entry);
     let result;
     if (entry.timestamp < this.start || entry.timestamp >= this.end) {
       result = reject('outside this field');
@@ -122,7 +120,7 @@ export class Arcade {
   async #run(entry, b, profiles) {
     if (typeof b.id !== 'string' || !CALLSIGN.test(b.id) || typeof b.pub !== 'string' || !HEX64.test(b.pub)
         || !Number.isSafeInteger(b.n) || b.n < 1 || !Number.isSafeInteger(b.score) || b.score < 0
-        || typeof b.seed !== 'string' || !HEX32.test(b.seed) || typeof b.sig !== 'string' || !HEX128.test(b.sig)
+        || typeof b.seed !== 'string' || !HEX32.test(b.seed) || !signatureShape(this.cfg, b)
         || typeof b.inputs !== 'string' || b.inputs.length > MAX_INPUT_HEX) {
       return reject('malformed run');
     }
@@ -136,7 +134,7 @@ export class Arcade {
       return reject(`bad inputs: ${error.message}`);
     }
     const statement = runStatement(this.cfg, this.field, b.seed, b.id, b.n, inputsHash(encoded), b.score);
-    if (!(await ed25519Verify(fromHex(b.pub), fromHex(b.sig), utf8(statement)))) {
+    if (!(await authentic(this.cfg, entry, b, b.pub, statement))) {
       return reject('run signature does not verify');
     }
     if (b.n <= (this.nonces.get(b.id) ?? 0)) return reject('stale nonce (replayed)');

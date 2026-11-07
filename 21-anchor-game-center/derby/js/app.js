@@ -4,7 +4,7 @@
 // every other browser (start = the beacon block's certified time + 2 s).
 
 import { CONFIG } from './config.js';
-import { Derby, Race, TICKS_PER_SECOND, betStatement, hourOf, hourTopic, raceClose, raceOf, raceStart } from './derby.js';
+import { Derby, Race, TICKS_PER_SECOND, hourOf, hourTopic, raceClose, raceOf, raceStart } from './derby.js';
 import { Renderer } from './render.js';
 import { proveRace } from './proofs.js';
 import { applyProxy, withQuery } from '../../shared/config.js';
@@ -12,11 +12,13 @@ import { Ledger } from '../../shared/ledger.js';
 import { Session } from '../../shared/auth.js';
 import { ProofPanel, esc, reportReachability, toast } from '../../shared/ui.js';
 import { ed25519Supported, fromHex } from '../../shared/crypto.js';
+import { connectMoves, showSession } from '../../shared/sessions.js';
 
 const $ = (id) => document.getElementById(id);
 const proxy = await applyProxy();
 const ledger = new Ledger(CONFIG, { proxy });
 const session = new Session(ledger);
+const moves = await connectMoves(ledger, CONFIG, session, () => render());
 const panel = new ProofPanel();
 const renderer = new Renderer($('sky'), CONFIG);
 $('back').href = withQuery('../');
@@ -62,7 +64,7 @@ async function sync() {
     do {
       again = false;
       const d = derby;
-      const entries = await ledger.entriesFrom(CONFIG.movesChain, hourTopic(CONFIG, d.hour), d.position.height);
+      const entries = await moves.entries(hourTopic(CONFIG, d.hour), d.position.height);
       for (const entry of entries) {
         if (d !== derby) return;
         let result;
@@ -109,10 +111,9 @@ async function placeBet() {
   const n = nextNonce();
   const comet = ui.pick;
   const stake = ui.stake;
-  const sig = await c.sign(betStatement(CONFIG, derby.hour, c.id, n, race, comet, stake));
   try {
-    const body = JSON.stringify({ t: 'bet', id: c.id, pub: c.pub, n, race, comet, stake, sig });
-    const { messageId } = await ledger.submit(CONFIG.movesChain, session.relay, hourTopic(CONFIG, derby.hour), { body });
+    const { messageId } = await moves.submit(c, session.relay, hourTopic(CONFIG, derby.hour),
+      { t: 'bet', id: c.id, pub: c.pub, n, race, comet, stake });
     ui.pending.set(messageId, { comet, stake, race });
     render();
   } catch (error) {
@@ -136,7 +137,8 @@ async function postBeacons(now) {
     if (now < raceClose(CONFIG, rec.race) + 300) continue;
     ui.posted.add(rec.race);
     try {
-      await ledger.submit(CONFIG.movesChain, session.relay, hourTopic(CONFIG, derby.hour), { body: '{"t":"go"}' });
+      if (!session.commander) throw new Error('only a signed-in player can post the beacon message');
+      await moves.submit(session.commander, session.relay, hourTopic(CONFIG, derby.hour), { t: 'go' });
     } catch {
       ui.posted.delete(rec.race);
     }
@@ -279,6 +281,7 @@ function render() {
     $('avatar').textContent = c.id[0];
     $('me-name').textContent = c.id;
     $('me-key').textContent = `key ${c.pub.slice(0, 6)}…${c.pub.slice(-4)}`;
+    showSession($('me-key'), moves);
   }
   $('credits').textContent = c ? (shownCredits(c.id) - pendingStake()).toLocaleString() : '—';
   $('stakes').innerHTML = STAKES.map((s) => `<button class="${s === ui.stake ? 'on' : ''}" data-s="${s}">${s}</button>`).join('');
@@ -311,7 +314,7 @@ function openRace(r) {
       <dt>Beacon</dt><dd class="mono">block #${rec.beacon.height} · root ${rec.beacon.stateRoot.slice(0, 16)}…</dd>
     </dl>
     <div class="proof-out"></div>`);
-  panel.run(() => proveRace(CONFIG, ledger, derby, rec, bet, { threshold: ui.status?.threshold ?? 1 }), `Race ${r % 1000}`);
+  panel.run(() => proveRace(CONFIG, ledger, moves, derby, rec, bet, { threshold: ui.status?.threshold ?? 1 }), `Race ${r % 1000}`);
 }
 
 async function refreshMeta() {

@@ -5,8 +5,14 @@
 // each revealed board and secret rebuilds its committed root, both fleets are
 // legal, and the result follows.
 
-import { MESSAGE_SUBJECT, rootChecks, typedProof } from '../../shared/proofs.js';
+import { MESSAGE_SUBJECT, authorshipChecks, rootChecks, typedProof } from '../../shared/proofs.js';
 import { DEPTH, climb, fleetRoot, validFleet } from './sonar.js';
+
+/** Was the message at `ref` written by `who`'s session key, bound to them by their pass? Checked here. */
+async function authoredBy(cfg, ledger, moves, ref, who) {
+  const message = ref && await ledger.message(cfg.movesChain, ref.messageId);
+  return !!message && (await authorshipChecks(moves, message, who.id, who.pub)).checks.every((c) => c.ok);
+}
 
 async function recorded(ledger, cfg, refs, anchor) {
   const last = Math.max(...refs.map((r) => r.height));
@@ -22,7 +28,7 @@ async function recorded(ledger, cfg, refs, anchor) {
 }
 
 /** Prove one answered shot; `commit` is the defender's lobby message (challenge or accept). */
-export async function proveShot(cfg, ledger, battle, record, commit, { threshold } = {}) {
+export async function proveShot(cfg, ledger, moves, battle, record, commit, { threshold } = {}) {
   const defender = battle.players[1 - record.by];
   const attacker = battle.players[record.by];
   const steps = climb(cfg, record.cell, record.ship, record.salt, record.path);
@@ -33,6 +39,8 @@ export async function proveShot(cfg, ledger, battle, record, commit, { threshold
     ...steps.slice(1, DEPTH).map((h, i) => ({ ok: true, text: `level ${i + 1}: hash with sibling ${record.path[i].slice(0, 8)}… → ${h.slice(0, 10)}…` })),
     { ok: steps[DEPTH] === defender.root,
       text: `level ${DEPTH}: ${steps[DEPTH].slice(0, 12)}… — exactly the committed root, so “${record.ship ? 'hit' : 'miss'}” is the truth` },
+    { ok: await authoredBy(cfg, ledger, moves, record.shot, attacker) && await authoredBy(cfg, ledger, moves, record.answer, defender),
+      text: `${attacker.id}’s session key signed the shot and ${defender.id}’s the answer, each bound to its commander by a session pass` },
   ];
   const anchor = await ledger.anchor(cfg.movesChain);
   const r = await recorded(ledger, cfg, [commit, record.shot, record.answer], anchor);
@@ -43,7 +51,7 @@ export async function proveShot(cfg, ledger, battle, record, commit, { threshold
 }
 
 /** Prove a finished battle from both reveals. */
-export async function proveBattle(cfg, ledger, battle, { threshold } = {}) {
+export async function proveBattle(cfg, ledger, moves, battle, { threshold } = {}) {
   const checks = [];
   for (const seat of [0, 1]) {
     const p = battle.players[seat];
@@ -51,6 +59,7 @@ export async function proveBattle(cfg, ledger, battle, { threshold } = {}) {
     if (!rv) { checks.push({ ok: battle.winner !== seat, text: `${p.id} never revealed their fleet` }); continue; }
     const root = fleetRoot(cfg, rv.board, rv.secret);
     checks.push({ ok: root === p.root, text: `${p.id}’s revealed board and secret rebuild their committed root ${p.root.slice(0, 12)}…` });
+    checks.push({ ok: await authoredBy(cfg, ledger, moves, rv.ref, p), text: `${p.id}’s session key signed the reveal` });
     checks.push({ ok: validFleet(cfg, rv.board) === rv.valid,
       text: rv.valid ? `${p.id}’s fleet is legal: five straight ships of ${cfg.fleet.join(', ')}` : `${p.id}’s fleet is not legal` });
   }

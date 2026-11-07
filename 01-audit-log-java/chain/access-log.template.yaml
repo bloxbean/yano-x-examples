@@ -1,0 +1,20 @@
+# Example 01 as an app-chain template: a shared access-change audit log.
+#
+# ./cluster start turns it into a draft with
+#   yano.sh appchain new access-log --from chain/access-log.template.yaml
+# then runs the ordinary setup commands (request, seal, join, start) for three
+# local members on a private devnet. seal fixes the operators, threshold, member
+# keys, plugin digests and the chain's genesis identity; nothing here is per node.
+membership: static     # the member set is fixed at seal; `governed` lets members vote changes in
+sequencing: fixed      # the lead (node0) proposes every block
+chains:
+  # One chain, one job: an append-only log of access-control changes, on the
+  # release's audit-log recipe (the stock ordered-log state machine).
+  - id: access-log-chain
+    recipe: audit-log
+    settings:
+      # A block every second keeps the demo responsive. Finality still needs a
+      # round trip to a threshold of members; it is not instant.
+      block.interval-ms: "1000"
+    # ./cluster start anchors it to Cardano in script mode (--no-anchor skips it).
+    anchor: {mode: script, every-blocks: 10}

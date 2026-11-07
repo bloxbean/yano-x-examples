@@ -109,3 +109,6 @@ select { font: inherit; font-size: 12px; color: var(--text); background: rgba(5,
 .sealed { margin-top: 12px; padding: 10px 12px; border-radius: 10px; font-size: 13px;
   border: 1px solid rgba(255, 204, 77, 0.55); color: var(--gold); background: rgba(40, 30, 6, 0.6); }
 .sealed.wait { border-color: var(--line); color: var(--muted); background: transparent; }
+
+/* the session key that signs this game's moves (shared/sessions.js) */
+.session-line { color: var(--muted); font-size: 11px; }

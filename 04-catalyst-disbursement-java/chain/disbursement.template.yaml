@@ -1,0 +1,28 @@
+# Example 04 as an app-chain template: Catalyst milestone disbursement.
+#
+# Milestone reviewers authorize a payout. What they sign is the hash of a
+# Cardano transaction body - which IS that transaction's id - so the approval
+# record names the exact payment, and anyone can check it against L1.
+#
+# ./cluster start turns it into a draft with
+#   yano.sh appchain new disbursement --from chain/disbursement.template.yaml
+# then runs the ordinary setup commands (request, seal, join, start) for three
+# local members on a private devnet. seal fixes the operators, threshold, member
+# keys, plugin digests and the chain's genesis identity; nothing here is per node.
+membership: governed   # members can vote membership changes in; they also govern the registry
+sequencing: fixed      # the lead (node0) proposes every block
+chains:
+  # Business actors (reviewers from different guilds) approve a payload hash
+  # under a governed policy, on the release's role-approval recipe (the
+  # role-approvals state machine). The member nodes only relay; they govern the
+  # registry of organizations, actors and policies, which the demo bootstraps.
+  - id: disbursement-chain
+    recipe: role-approval
+    settings:
+      # A block every 200 ms keeps the review steps snappy.
+      block.interval-ms: "200"
+      # How far ahead a registry change (propose -> approve -> activate) may
+      # expire: 18000 blocks is about an hour at 200 ms. The default is 1000.
+      machines.composite.roles.maximum-mutation-lifetime-blocks: "18000"
+    # ./cluster start anchors it to Cardano in script mode (--no-anchor skips it).
+    anchor: {mode: script, every-blocks: 10}

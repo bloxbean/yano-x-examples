@@ -9,23 +9,25 @@
 // simulation and pays out the same pari-mutuel pool. There is no house and no
 // server: balances are whatever folding the hour's finalized messages says.
 //
-// One topic per hour (CONFIG.hourMs), so balances reset hourly:
-//   bet  {"t":"bet","id","pub","n","race","comet","stake","sig"}
+// One topic per hour (CONFIG.hourMs), games/derby/h<hour>, so balances reset hourly:
+//   bet  {"t":"bet","id","pub","n","race","comet","stake"}
 //   go   {"t":"go"}                     anyone; just a message after the close
+//
+// Every message is signed by a player's session key for games/derby/.
 //
 // Commanders are checked against their profile on the authenticated-map chain
 // (shared/profiles.js), as in the other games.
 
 import { blake2b } from '../../shared/blake2b.js';
-import { ed25519Verify, fromHex, toHex, utf8 } from '../../shared/crypto.js';
+import { toHex, utf8 } from '../../shared/crypto.js';
+import { authentic, moveBody, signatureShape } from '../../shared/moves.js';
 import { rng } from '../../shared/rng.js';
 
 const CALLSIGN = /^[a-z0-9][a-z0-9_-]{2,19}$/;
 const HEX64 = /^[0-9a-f]{64}$/;
-const HEX128 = /^[0-9a-f]{128}$/;
 
 export const hourOf = (cfg, ts) => Math.floor(ts / cfg.hourMs);
-export const hourTopic = (cfg, hour) => `${cfg.app.replace('/', '.')}.h${hour}`;
+export const hourTopic = (cfg, hour) => `${cfg.scope}h${hour}`;
 export const raceOf = (cfg, ts) => Math.floor(ts / cfg.raceMs);
 export const raceStart = (cfg, race) => race * cfg.raceMs;
 export const raceClose = (cfg, race) => race * cfg.raceMs + cfg.betMs;
@@ -155,7 +157,7 @@ export class Derby {
   balance(id) { return this.balances.get(id) ?? this.cfg.grant; }
 
   /**
-   * Apply one finalized message: { height, index, messageId, timestamp, stateRoot, bodyHex }.
+   * Apply one finalized message: { height, index, messageId, timestamp, stateRoot, body, author } (shared/moves.js).
    * `profiles(id, pub, ts)` answers { ok } / { ok: false, reason }, or throws to
    * say "ask again later" — the same entry must then be retried.
    * Returns { accepted, kind?, reason?, settled: [race records settled by this block] }.
@@ -166,8 +168,7 @@ export class Derby {
       return { skipped: true };
     }
     const settled = this.#settle(entry);
-    let body;
-    try { body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(fromHex(entry.bodyHex))); } catch { body = null; }
+    const body = moveBody(this.cfg, entry);
     let result;
     if (entry.timestamp < this.start || entry.timestamp >= this.end) result = reject('outside this hour');
     else if (body?.t === 'go') result = { accepted: true, kind: 'go' };
@@ -212,7 +213,7 @@ export class Derby {
     const { cfg } = this;
     if (typeof b.id !== 'string' || !CALLSIGN.test(b.id) || typeof b.pub !== 'string' || !HEX64.test(b.pub)
         || !Number.isSafeInteger(b.n) || b.n < 1 || !Number.isSafeInteger(b.race) || !Number.isSafeInteger(b.comet)
-        || !Number.isSafeInteger(b.stake) || typeof b.sig !== 'string' || !HEX128.test(b.sig)) {
+        || !Number.isSafeInteger(b.stake) || !signatureShape(cfg, b)) {
       return reject('malformed bet');
     }
     if (b.comet < 0 || b.comet >= cfg.comets.length) return reject('no such comet');
@@ -220,7 +221,7 @@ export class Derby {
     if (b.race !== raceOf(cfg, entry.timestamp)) return reject('final in another race slot');
     if (entry.timestamp >= raceClose(cfg, b.race)) return reject('betting had closed when this was final');
     const statement = betStatement(cfg, this.hour, b.id, b.n, b.race, b.comet, b.stake);
-    if (!(await ed25519Verify(fromHex(b.pub), fromHex(b.sig), utf8(statement)))) return reject('signature does not verify');
+    if (!(await authentic(cfg, entry, b, b.pub, statement))) return reject('signature does not verify');
     if (b.n <= (this.nonces.get(b.id) ?? 0)) return reject('stale nonce (replayed)');
     if (this.keys.has(b.id) && this.keys.get(b.id) !== b.pub) return reject('not this commander’s key');
     if (!this.keys.has(b.id)) {

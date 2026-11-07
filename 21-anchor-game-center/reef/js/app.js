@@ -3,7 +3,7 @@
 // travel back to), and places signed patterns where you click.
 
 import { CONFIG } from './config.js';
-import { PATTERNS, Reef, Timeline, census, seasonOf, seasonTopic, seedStatement, shape, worldHash } from './reef.js';
+import { PATTERNS, Reef, Timeline, census, seasonOf, seasonTopic, shape, worldHash } from './reef.js';
 import { Renderer, drawChart } from './render.js';
 import { provePlacement, proveWorld } from './proofs.js';
 import { applyProxy, withQuery } from '../../shared/config.js';
@@ -11,11 +11,13 @@ import { Ledger } from '../../shared/ledger.js';
 import { Session } from '../../shared/auth.js';
 import { ProofPanel, esc, reportReachability, toast } from '../../shared/ui.js';
 import { ed25519Supported } from '../../shared/crypto.js';
+import { connectMoves, showSession } from '../../shared/sessions.js';
 
 const $ = (id) => document.getElementById(id);
 const proxy = await applyProxy();
 const ledger = new Ledger(CONFIG, { proxy });
 const session = new Session(ledger);
+const moves = await connectMoves(ledger, CONFIG, session, () => { lastSide = ''; renderSide(); });
 const panel = new ProofPanel();
 const renderer = new Renderer($('world'), CONFIG);
 $('back').href = withQuery('../');
@@ -70,7 +72,7 @@ async function sync() {
     do {
       again = false;
       const r = reef;
-      const entries = await ledger.entriesFrom(CONFIG.movesChain, seasonTopic(CONFIG, r.season), r.position.height);
+      const entries = await moves.entries(seasonTopic(CONFIG, r.season), r.position.height);
       for (const entry of entries) {
         if (r !== reef) return;
         let result;
@@ -124,10 +126,9 @@ async function place(x, y) {
   if (!player && reef.players.size >= CONFIG.maxPlayers) { toast('This season’s reef already has six species', 'info'); return; }
   const n = nextNonce();
   const { pattern, rot } = ui;
-  const sig = await c.sign(seedStatement(CONFIG, reef.season, c.id, n, pattern, x, y, rot));
   try {
-    const body = JSON.stringify({ t: 'seed', id: c.id, pub: c.pub, n, pattern, x, y, rot, sig });
-    const { messageId } = await ledger.submit(CONFIG.movesChain, session.relay, seasonTopic(CONFIG, reef.season), { body });
+    const { messageId } = await moves.submit(c, session.relay, seasonTopic(CONFIG, reef.season),
+      { t: 'seed', id: c.id, pub: c.pub, n, pattern, x, y, rot });
     ui.pending.set(messageId, { x, y, cost: PATTERNS[pattern].cost });
   } catch (error) {
     toast(`Could not place: ${error.message}`, 'info');
@@ -140,7 +141,7 @@ async function openSeason() {
   if (ui.opening || reef.origin) return;
   ui.opening = true;
   try {
-    await ledger.submit(CONFIG.movesChain, session.relay, seasonTopic(CONFIG, reef.season), { body: '{"t":"open"}' });
+    await moves.submit(session.commander, session.relay, seasonTopic(CONFIG, reef.season), { t: 'open' });
     for (let i = 0; i < 60 && !reef.origin; i++) { await new Promise((r) => setTimeout(r, 250)); await sync(); }
   } catch (error) {
     toast(`Could not open the season: ${error.message}`, 'info');
@@ -235,6 +236,7 @@ function renderSide() {
     $('avatar').style.background = mySpecies() ? rgb(mySpecies()) : '';
     $('me-name').textContent = c.id;
     $('me-key').textContent = `key ${c.pub.slice(0, 6)}…${c.pub.slice(-4)}`;
+    showSession($('me-key'), moves);
   }
   if (!reef) return;
   const player = c ? reef.players.get(c.id) : null;
@@ -315,7 +317,7 @@ $('placements').addEventListener('click', (e) => {
     panel.open(`${PATTERNS[p.pattern].name} by ${p.id}`, `
       <dl class="facts"><dt>Where</dt><dd>${p.x}, ${p.y} · rotated ${p.rot * 90}°</dd>
         <dt>When</dt><dd>generation ${p.gen} · block #${p.height}</dd></dl><div class="proof-out"></div>`);
-    panel.run(() => provePlacement(CONFIG, ledger, reef, p, { threshold: ui.status?.threshold ?? 1 }), 'This placement');
+    panel.run(() => provePlacement(CONFIG, ledger, moves, reef, p, { threshold: ui.status?.threshold ?? 1 }), 'This placement');
   }
 });
 $('prove-world').addEventListener('click', () => {
