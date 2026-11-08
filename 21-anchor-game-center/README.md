@@ -30,7 +30,7 @@ Requires **Yano X 0.1.0-pre6** or later (topic policies, ADR-038).
 | [Comet Derby](derby/) | Bet credits on six comets racing round a sun; a race every 75 s, everyone at once | **A random beacon nobody controls:** each race is seeded by a block certified after betting closed; every browser runs the same race and pays the same pool |
 | [Reef](reef/) | Drop gliders, spaceships and glider guns into a shared multi-species Game of Life; 20-minute seasons | **The log is the world:** a few kilobytes of placements grow 16,000 cells on certified block time, identically everywhere — and any generation can be rebuilt (time travel) |
 | [Deep Sonar](sonar/) | Battleship with hidden fleets, 1 v 1, 40 s turns | **Hidden information, no referee:** each fleet is a Merkle root; every hit or miss arrives with a Merkle proof against it |
-| [Neon Rush](moto/) | A night-city motorbike time trial: two laps of neon streets, traffic and slipstreams; 15-minute seasons | **Replay-verified times, live rivals:** each circuit comes from a block; you submit inputs, every browser replays them for your time, and signed checkpoint splits show riders on your road about a second later |
+| [Neon Rush](moto/) | A night-city motorbike time trial: two laps of neon streets, traffic and slipstreams; 15-minute seasons | **Replay-verified times, live rivals:** each circuit comes from a block; you submit inputs, every browser replays them for your time, and signed checkpoint splits show riders on your road about a second later. **Race lobbies** gather riders and start them together at a ledger time |
 | [Land Rush](land/) | Found a capital and grow a realm on a hex map; hourly seasons, everyone at once | **Enforces the core rule itself:** each tile is a `PUT_IF_ABSENT`, so the members refuse a second claim; free tiles can be proven free |
 
 | | |
@@ -408,6 +408,85 @@ ride's own replay decides its splits.
 and time, a fresh replay here crossing the line at the same frame, and the
 record under the root anchored on Cardano — or ▶ watch it replayed.
 
+### Race together: lobbies
+
+A rider opens a race on the season's circuit from **Race together**, choosing
+how long it stays open (15, 30, 60 or 120 s), how many riders it takes (2–8,
+host included) and what happens if nobody joins. Everyone on the page sees it,
+with its countdown and its grid, and can join until it closes. Then the race
+starts, the same moment in every browser, and every rider is held on the grid
+until it does: a big 3-2-1-GO, with the other riders beside you.
+
+The lobby is four more kinds of message on the season's topic, signed by the
+session key like every other move, so the members order them with the rides:
+
+```
+lobby  {"t":"lobby","id","pub","n","wait","max","alone"}  open a race; this message's id names the race
+join   {"t":"join","id","pub","n","race"}                 take a place on its grid
+leave  {"t":"leave","id","pub","n","race"}                give it up; the host leaving cancels the race
+start  {"t":"start","id","pub","n","race"}                the host closes the lobby now
+```
+
+**Every time is ledger time.** The lobby closes `wait` after the timestamp of
+the block that finalized it (or at the host's `start`); the grid is everyone
+whose join was finalized in a block stamped before that; the race starts five
+seconds after the close. Those are block timestamps, so every browser folding
+the same topic computes the same grid and the same start
+([`lobbyPhase`](moto/js/races.js)). The five seconds are for the browsers: by
+then each has seen the block that closed the lobby. A page keeps its own
+estimate of ledger time, from the timestamps of the blocks it sees and of its
+own moves, and counts down to that.
+
+**A race ride is an ordinary ride, tagged with the race.** It counts for the
+season like any other, and for the race too if it was finalized within the
+window its own time allows after the start: no earlier than three seconds
+before *start + ride time* (no jump start; the slack is for clocks), no later
+than twenty seconds after (the start was missed, or the ride arrived too late).
+The grid is placed by ridden time, because everyone started together; ties go
+to the earlier message ([`raceStandings`](moto/js/races.js)). Splits carry the
+race too, so riders see each other on the road, but they stay advisory.
+
+| Situation | What happens |
+|---|---|
+| A join finalized at or after the close | Refused: the lobby has closed. Every browser agrees, because the block's timestamp decides. |
+| The same rider joins twice, or a full grid | Refused: already on this grid / the grid is full. |
+| Nobody joins by the close | The host's choice: **wait once more** (the lobby stays open for another `wait`, then is cancelled if still alone) — the default; **ride alone** (a solo race against the clock); or **cancel**. |
+| The host wants to go before the close | **Start now** closes the lobby at that block; the race starts five seconds later. |
+| A rider leaves before the close | Their place is free again. If the host leaves, the race is cancelled. After the close nobody can leave: not finishing is a DNF. |
+| A rider is on two grids | Refused: one race at a time, until your ride in it counts or it ends. |
+| A browser reloads or reconnects before the start | It rebuilds the lobby from the ledger, finds you on the grid and puts you back on it for the countdown. |
+| A rider arrives after the start | The page offers to ride at once, and says how late; the ride counts for the race if it still lands in its window (twenty seconds of slack), otherwise only for the season. |
+| The connection drops mid-ride | The ride goes on in the tab; at the finish the page keeps resubmitting until the race window closes. |
+| The tab closes mid-ride | The inputs lived in that tab; the rider is a DNF. Their other rides are unaffected. |
+| The season is about to change | A lobby can only be opened if its longest possible race ends within the season; the page says so and greys the button. |
+
+Limits: at most eight races under way per season, eight riders per grid, and
+a lobby message is well under the game entry's 40 KB payload limit. Lobbies
+are per season, so the next circuit starts with none; the page lists races to
+come and under way, and the ones that ended in the last five minutes.
+
+#### Try it: two browsers, one race
+
+1. `./cluster start` and `node serve.mjs --local`, then open
+   `http://localhost:8787/moto/?proxy=1` in two browser profiles (or one normal
+   and one private window) and sign up a different commander in each.
+2. In the first, under **Race together**, keep *30 s*, *4 riders*, *wait once
+   more*, and press **Open a race**. Both pages list *Race xxxxxx by you · open
+   · closes in 0:30*.
+3. In the second, press **Join**. Both grids now list both riders, and both
+   prompts say when the lobby closes. Reload the second page: it is still on
+   the grid.
+4. At the close both pages hold their bikes on the grid with *starts in 0:05*,
+   then count 3-2-1-GO together. Ride (or add `&autopilot` to the URLs to let
+   the attract mode's rider steer — its rides are ordinary, signed and
+   replayed). Each rider appears on the other's road from their splits.
+5. When both finish, the race card shows the same places and times in both
+   browsers; ▶ replays a ride from the ledger and a name proves it.
+
+Run with two headless browsers on one machine, the grids matched (also after
+a reload), GO fired 11 ms apart, each rider saw the other live, and both
+pages showed the same places and times.
+
 ## Sealed Duels · plugin edition
 
 The same game, with the rules moved from the browsers to the members. Open
@@ -492,8 +571,15 @@ agree on all of it (see [plugin/README.md](plugin/README.md)).
   among the members or a VRF.
 - **Neon Rush's live riders are estimates.** A split says where a rider was;
   the page extrapolates from their average speed until the next one, so a
-  live rider can jump slightly when a split arrives. As with the arcade,
-  replay cannot tell a human from a bot.
+  live rider can jump slightly when a split arrives. In a race, a rider
+  without a split yet is drawn at your pace. As with the arcade, replay
+  cannot tell a human from a bot (`&autopilot` makes that plain).
+- **A race starts together only as well as the clocks agree.** The start is a
+  ledger time; each page counts down to its estimate of it, which can be off
+  by about the network latency. The window a race ride must land in absorbs
+  that, but it also means a rider can start a second or two late and still
+  count: places come from ridden time, not from who crossed the line first in
+  the world.
 - **Reef and Derby replay their topic on load.** An hour of bets or a season
   of placements is small, but a long-lived world would checkpoint.
 - **Deep Sonar needs the browser that holds your fleet.** The board and secret
@@ -529,7 +615,7 @@ agree on all of it (see [plugin/README.md](plugin/README.md)).
 ## Tests
 
 ```bash
-npm test                                          # 74 checks, no cluster needed
+npm test                                          # 80 checks, no cluster needed
 node --no-warnings test/duel-vectors.mjs          # rewrite the browser rules' duel vectors for the plugin
 (cd plugin && ./gradlew test)                     # the plugin agrees with them (6 tests)
 ```
@@ -567,7 +653,14 @@ answers verify and lies do not, fleet legality, a whole battle with a refused
 lie, sinking and reveals, a fleet with too few ship cells caught by its answers,
 and a missed deadline); and Neon Rush (circuits from seeds, rides replaying to
 the same frame while changed or cut inputs do not, a faster claimed time
-refused, live splits, replayed and wrong-circuit rides).
+refused, live splits, replayed and wrong-circuit rides; and its race lobbies:
+joins in order up to the millisecond before the close and refused at it, the
+start a fixed lead after the close and the same in two independent folds,
+duplicate joins, a full grid, one race at a time, stale nonces, the host's
+early start, the three answers to a solo lobby, leaving and the host's leave
+cancelling, race rides placed by ridden time while a jump start, a missed
+start and a rider off the grid count for the season only, DNFs, and a race
+that would outlast its season).
 
 ## Files
 

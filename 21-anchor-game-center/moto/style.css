@@ -71,3 +71,34 @@ html, body { height: 100%; overflow: hidden; background: #05030f; }
 .legend { margin-top: 8px; }
 .howto { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
 .board li.empty { display: block; }
+
+.lobby-new { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; align-items: end; }
+.lobby-new label { display: grid; gap: 3px; }
+.lobby-new label:nth-child(3) { grid-column: 1 / -1; }
+.lobby-new select { width: 100%; }
+.lobby-new .btn { grid-column: 1 / -1; }
+.lobby-note { margin-top: 6px; color: var(--muted); }
+.lobby-note:empty { display: none; }
+.lobbies { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; font-size: 12px; }
+.lobbies > li { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: rgba(20, 14, 44, 0.5); }
+.lobbies > li.mine { border-color: rgba(62, 230, 255, 0.5); }
+.lobbies .head { display: flex; gap: 6px; align-items: baseline; }
+.lobbies .state { margin-left: auto; font-family: var(--mono); color: var(--gold); }
+.lobbies .state.open { color: var(--good); }
+.lobbies .state.cancelled, .lobbies .state.finished { color: var(--muted); }
+.lobbies .riders { margin: 5px 0 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.lobbies .rider { padding: 1px 7px; border-radius: 999px; background: rgba(255, 255, 255, 0.07); }
+.lobbies .rider.me { background: rgba(62, 230, 255, 0.18); }
+.lobbies .acts { display: flex; gap: 6px; margin-top: 6px; }
+.lobbies .acts .btn { padding: 4px 10px; font-size: 12px; }
+.lobbies .result { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 2px; }
+.lobbies .result li { display: grid; grid-template-columns: 18px 1fr auto 22px; gap: 6px; align-items: center; }
+.lobbies .result .t { font-family: var(--mono); color: var(--gold); }
+.lobbies .result .dnf { color: var(--muted); }
+.lobbies .result button { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 0; font: inherit; }
+.prompt-race { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 13px; }
+.prompt-race .row { justify-content: center; margin-top: 8px; }
+.grid-card { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); text-align: center; font-size: 13px;
+  background: rgba(10, 6, 28, 0.82); border: 1px solid rgba(62, 230, 255, 0.35); border-radius: 14px; padding: 10px 16px;
+  pointer-events: none; }
+.grid-card b { color: var(--gold); }

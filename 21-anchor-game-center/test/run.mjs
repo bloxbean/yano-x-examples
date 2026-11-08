@@ -27,7 +27,7 @@ import { CONFIG as REEF } from '../reef/js/config.js';
 import { Reef, Timeline, census, seedStatement, shape, soup, stamp, step, worldHash } from '../reef/js/reef.js';
 import { CONFIG as MOTO } from '../moto/js/config.js';
 import { Run as Ride, Track, autopilot as rider, replay as replayRide, THROTTLE as GAS } from '../moto/js/sim.js';
-import { Circuit, circuitSeed, inputsHash as rideHash, runStatement as rideStatement, splitStatement } from '../moto/js/races.js';
+import { Circuit, RIDE_MS, circuitSeed, inputsHash as rideHash, lobbyPhase, raceStandings, runStatement as rideStatement, splitStatement } from '../moto/js/races.js';
 import { CONFIG as SONAR } from '../sonar/js/config.js';
 import { Moves, openMove, passStatement, requestStatement } from '../shared/sessions.js';
 import * as Topics from '../shared/topic-client/topics.mjs';
@@ -1166,6 +1166,153 @@ await check('the season: a run counts only if its inputs replay to the claimed t
   eq((await circuit.apply(rooted(entry(honest, MT + 5000), HROOT('h')), anyone)).reason, 'stale nonce (replayed)');
   const elsewhere = await rideRun('satya', circuit, frames, finished, '00'.repeat(16));
   eq((await circuit.apply(rooted(entry(elsewhere, MT + 6000), HROOT('i')), anyone)).reason, 'ridden on another circuit');
+});
+
+console.log('neon rush race lobbies');
+
+// Lobby events are ordinary season moves; a race is named by its lobby message's id.
+const raceMsg = (move, ts) => { height += 1; return sessionEntry(move, { height, index: 0, messageId: height.toString(16).padStart(64, '0'), timestamp: ts }); };
+async function raceMove(t, id, fields) {
+  const c = await commander(id);
+  return signedBy(c, { t, id, pub: c.pub, n: ++rideNonce, ...fields });
+}
+const R = MOTO.race;
+async function season(at = MT + 1000) {
+  height = 60_000 + Math.floor(Math.random() * 1e6);
+  const circuit = new Circuit(MOTO, MS);
+  await circuit.apply(rooted(raceMsg({ t: 'open' }, at), HROOT('l')), anyone);
+  return circuit;
+}
+const play = async (circuit, move, ts) => circuit.apply(rooted(raceMsg(move, ts), HROOT('m')), anyone);
+async function openLobby(circuit, host, ts, { wait = 30_000, max = 4, alone = 'wait' } = {}) {
+  const r = await play(circuit, await raceMove('lobby', host, { wait, max, alone }), ts);
+  assert(r.accepted, r.reason);
+  return r.lobby.id;
+}
+const grid = (circuit, race) => circuit.lobbies.get(race).members.map((m) => m.id).join(',');
+
+await check('a lobby: joins finalized before the close take a place in order; at the close or after, and twice, they are refused', async () => {
+  const a = await season();
+  const b = await season(); // a second browser, folding the same messages
+  const moves = [];
+  const both = async (move, ts) => { const e = raceMsg(move, ts); const ra = await a.apply(rooted(e, HROOT('m')), anyone); const rb = await b.apply(rooted(e, HROOT('m')), anyone); eq(ra.accepted, rb.accepted); eq(ra.reason, rb.reason); moves.push(ra); return ra; };
+  const created = await both(await raceMove('lobby', 'nova', { wait: 30_000, max: 4, alone: 'wait' }), MT + 10_000);
+  const race = created.lobby.id;
+  assert(/^[0-9a-f]{64}$/.test(race), 'the race is named by the lobby message id');
+  assert((await both(await raceMove('join', 'satya', { race }), MT + 20_000)).accepted);
+  eq((await both(await raceMove('join', 'satya', { race }), MT + 21_000)).reason, 'already on this grid');
+  assert((await both(await raceMove('join', 'kai', { race }), MT + 39_999)).accepted, 'one millisecond before the close');
+  eq((await both(await raceMove('join', 'lee', { race }), MT + 40_000)).reason, 'the lobby has closed');
+  eq(grid(a, race), 'nova,satya,kai');
+  eq(grid(b, race), grid(a, race), 'every browser has the same grid');
+  const pa = lobbyPhase(MOTO, a.lobbies.get(race), MT + 40_000);
+  const pb = lobbyPhase(MOTO, b.lobbies.get(race), MT + 40_000);
+  eq(pa.state, 'countdown');
+  eq(pa.closesAt, MT + 40_000);
+  eq(pa.startAt, MT + 40_000 + R.leadMs, 'the start is the close plus the lead, in ledger time');
+  eq(pb.startAt, pa.startAt, 'and the same for everyone');
+  eq(lobbyPhase(MOTO, a.lobbies.get(race), pa.startAt).state, 'racing');
+  eq(lobbyPhase(MOTO, a.lobbies.get(race), pa.startAt + RIDE_MS + R.graceMs).state, 'finished');
+});
+
+await check('a lobby: a full grid, one race at a time, a stale nonce, and only the host starts it early', async () => {
+  const c = await season();
+  const race = await openLobby(c, 'nova', MT + 10_000, { max: 2 });
+  assert((await play(c, await raceMove('join', 'satya', { race }), MT + 11_000)).accepted);
+  eq((await play(c, await raceMove('join', 'kai', { race }), MT + 12_000)).reason, 'the grid is full');
+  const other = await play(c, await raceMove('lobby', 'satya', { wait: 15_000, max: 4, alone: 'ride' }), MT + 13_000);
+  assert(/^already on the grid of race/.test(other.reason), other.reason);
+  const stale = await raceMove('leave', 'satya', { race });
+  stale.n = 1; // satya's join used a later nonce
+  eq((await play(c, stale, MT + 13_500)).reason, 'stale nonce (replayed)');
+  eq((await play(c, await raceMove('start', 'satya', { race }), MT + 14_000)).reason, 'only the host can start the race');
+  assert((await play(c, await raceMove('start', 'nova', { race }), MT + 15_000)).accepted);
+  const p = lobbyPhase(MOTO, c.lobbies.get(race), MT + 15_000);
+  eq(p.state, 'countdown');
+  eq(p.startAt, MT + 15_000 + R.leadMs);
+  eq((await play(c, await raceMove('join', 'kai', { race }), MT + 15_500)).reason, 'the lobby has closed');
+  eq((await play(c, await raceMove('join', 'kai', { race: 'ab'.repeat(32) }), MT + 16_000)).reason, 'no such race this season');
+  eq((await play(c, await raceMove('lobby', 'kai', { wait: 45_000, max: 4, alone: 'ride' }), MT + 16_500)).reason, 'malformed lobby');
+});
+
+await check('a solo lobby: the host chooses to wait once more, ride alone, or cancel', async () => {
+  const c = await season();
+  const cancel = await openLobby(c, 'nova', MT + 10_000, { wait: 15_000, alone: 'cancel' });
+  const p = lobbyPhase(MOTO, c.lobbies.get(cancel), MT + 25_000);
+  eq(p.state, 'cancelled');
+  eq(p.reason, 'nobody joined');
+  eq((await play(c, await raceMove('join', 'satya', { race: cancel }), MT + 25_000)).reason, 'the race was cancelled');
+  const solo = await openLobby(c, 'nova', MT + 30_000, { wait: 15_000, alone: 'ride' });
+  eq(lobbyPhase(MOTO, c.lobbies.get(solo), MT + 45_000).state, 'countdown', 'a solo race goes ahead');
+  const d = await season();
+  const waits = await openLobby(d, 'kai', MT + 10_000, { wait: 15_000, alone: 'wait' });
+  const e = lobbyPhase(MOTO, d.lobbies.get(waits), MT + 25_000);
+  eq(e.state, 'open');
+  eq(e.extended, true, 'alone at the close: open once more');
+  eq(e.closesAt, MT + 40_000);
+  assert((await play(d, await raceMove('join', 'lee', { race: waits }), MT + 30_000)).accepted, 'a join during the second wait');
+  const f = lobbyPhase(MOTO, d.lobbies.get(waits), MT + 40_000);
+  eq(f.state, 'countdown');
+  eq(f.startAt, MT + 40_000 + R.leadMs);
+  const alone = await openLobby(d, 'zed', MT + 50_000, { wait: 15_000, alone: 'wait' });
+  eq(lobbyPhase(MOTO, d.lobbies.get(alone), MT + 79_999).state, 'open');
+  eq(lobbyPhase(MOTO, d.lobbies.get(alone), MT + 80_000).state, 'cancelled', 'still alone after the second wait');
+});
+
+await check('leaving: before the close it frees the place, the host leaving cancels the race, after the close it is refused', async () => {
+  const c = await season();
+  const race = await openLobby(c, 'nova', MT + 10_000, { max: 2 });
+  assert((await play(c, await raceMove('join', 'satya', { race }), MT + 11_000)).accepted);
+  assert((await play(c, await raceMove('leave', 'satya', { race }), MT + 12_000)).accepted);
+  assert((await play(c, await raceMove('join', 'kai', { race }), MT + 13_000)).accepted, 'the freed place');
+  eq((await play(c, await raceMove('leave', 'satya', { race }), MT + 14_000)).reason, 'not on this race’s grid');
+  eq((await play(c, await raceMove('leave', 'kai', { race }), MT + 40_000)).reason, 'the lobby has closed', 'once closed, not finishing is a DNF');
+  const other = await openLobby(c, 'satya', MT + 41_000);
+  assert((await play(c, await raceMove('leave', 'satya', { race: other }), MT + 42_000)).accepted);
+  const p = lobbyPhase(MOTO, c.lobbies.get(other), MT + 42_000);
+  eq(p.state, 'cancelled');
+  eq(p.reason, 'its host left');
+});
+
+await check('race rides: placed by ridden time; a jump start, a missed start or a rider off the grid counts for the season only; no ride is a DNF', async () => {
+  const c = await season();
+  const race = await openLobby(c, 'nova', MT + 10_000);
+  for (const [id, at] of [['satya', 11_000], ['kai', 12_000], ['zed', 13_000]]) {
+    assert((await play(c, await raceMove('join', id, { race }), MT + at)).accepted);
+  }
+  const { startAt, endsAt } = lobbyPhase(MOTO, c.lobbies.get(race), MT + 40_000);
+  const fast = ride(c.track);
+  const slow = ride(c.track, (r) => (r.frame < 40 ? 0 : rider(r)));
+  assert(slow.finished > fast.finished, 'a slow start finishes later');
+  const crossed = (frames) => startAt + (frames * 1000) / 60;
+  const raceRun = async (id, r, ts) => play(c, { ...(await rideRun(id, c, r.frames, r.finished)), race }, ts);
+  const nova = await raceRun('nova', slow, crossed(slow.finished) + 800);
+  assert(nova.accepted && nova.race.counted, nova.race?.reason);
+  const satya = await raceRun('satya', fast, crossed(fast.finished) + 1200);
+  assert(satya.race.counted, satya.race.reason);
+  const kai = await raceRun('kai', fast, crossed(fast.finished) - R.earlyMs - 1);
+  assert(kai.accepted, 'a jump start still counts for the season');
+  assert(!kai.race.counted && /jump start/.test(kai.race.reason), kai.race.reason);
+  const late = await raceRun('zed', fast, crossed(fast.finished) + R.graceMs + 1);
+  assert(!late.race.counted && /missed/.test(late.race.reason), late.race.reason);
+  const stranger = await raceRun('lee', fast, crossed(fast.finished) + 1000);
+  eq(stranger.race.reason, 'not on this race’s grid');
+  eq((await raceRun('nova', fast, crossed(fast.finished) + 2000)).race.reason, 'already raced');
+  const during = raceStandings(MOTO, c.lobbies.get(race), endsAt - 1);
+  eq(during.map((r) => `${r.id}:${r.status}`).join(' '), 'satya:finished nova:finished kai:racing zed:racing');
+  const after = raceStandings(MOTO, c.lobbies.get(race), endsAt);
+  eq(after.map((r) => `${r.place ?? '-'}${r.id}:${r.status}`).join(' '), '1satya:finished 2nova:finished -kai:dnf -zed:dnf');
+  eq(c.leaderboard().length, 5, 'every verified ride is on the season board, raced or not');
+});
+
+await check('a race must end within its season; a race ride on another circuit is not a ride at all', async () => {
+  const c = await season();
+  const tooLate = MT + MOTO.seasonMs - (15_000 + R.leadMs + RIDE_MS + R.graceMs) + 1;
+  eq((await play(c, await raceMove('lobby', 'nova', { wait: 15_000, max: 4, alone: 'ride' }), tooLate)).reason,
+    'too close to the season change: the race would not end in this season');
+  assert((await play(c, await raceMove('lobby', 'nova', { wait: 15_000, max: 4, alone: 'ride' }), tooLate - 1)).accepted, 'the last moment that fits');
+  const elsewhere = { ...(await rideRun('nova', c, ride(c.track).frames, 100, '00'.repeat(16))), race: 'ab'.repeat(32) };
+  eq((await play(c, elsewhere, tooLate + 1000)).reason, 'ridden on another circuit');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
