@@ -56,11 +56,25 @@ node serve.mjs --local     # the site, a same-origin proxy and the delegation se
 ```
 
 Create a commander on the hub page, then pick a game; the sign-in carries to
-every game (same origin, same `localStorage`). The first time you open a game,
+every game (same origin, same browser storage). The first time you open a game,
 its page asks the delegation service for a session key; the side panel shows
 it (`session 3f2a…91 · games/galaxy/ · until 14:05`). To play against
 yourself, open `http://127.0.0.1:8787/?proxy=1` too: a different origin, so a
 separate browser identity.
+
+**Playing from other devices on your network.** `node serve.mjs --local --host 0.0.0.0`
+also listens on this machine's network addresses and prints them
+(`http://192.168.0.19:8787/?proxy=1`). Only the site's port is opened: the
+members and the delegation service stay on 127.0.0.1 behind its proxy. Two
+things to know:
+
+- Browsers give WebCrypto only to `https` pages and `localhost`, so over plain
+  `http` on a network address a visitor can watch every game but not sign in or
+  move. In Chrome, add the address (`http://192.168.0.19:8787`) under
+  `chrome://flags/#unsafely-treat-insecure-origin-as-secure` and relaunch; then
+  sign-in and session keys work. The sign-in panel says so when it applies.
+- Anyone who can reach the port can use the site and its proxy to the members.
+  Use it on a network you trust; the default (no `--host`) is this machine only.
 
 ```bash
 ./cluster status           # stage, members, each chain's height and anchoring
@@ -68,6 +82,12 @@ separate browser identity.
 ./cluster stop             # keep the chains, commanders and keys
 ./cluster clean            # stop and delete .yano/ (chains, member keys, publisher keys)
 ```
+
+After a `clean`, browsers still remember sign-ins and session keys from the old
+chains. A page notices a remembered key that the ledger's profile does not hold
+and asks you to sign in again; **Clear browser data** (on the center page, and
+in every game's sign-in panel) forgets everything the center keeps in this
+browser: the sign-in, session keys, and any hidden fleet or duel move in progress.
 
 `./cluster start` runs the release's own setup commands, as three operators
 would: `yano.sh appchain new games --from chain/games.template.yaml`, then
@@ -104,8 +124,59 @@ with AES-GCM under a key derived from the password (PBKDF2-SHA256, 600,000
 rounds), and stores `{call sign, public key, salt, locked key, self-signature}`
 with `PUT_IF_ABSENT` — so the ledger itself refuses a taken call sign. Signing
 in on another device fetches the profile, re-derives the lock key and unlocks
-the signing key. The unlocked key is remembered in `localStorage` until you
-sign out.
+the signing key. The unlocked key is remembered in the browser's IndexedDB
+until you sign out or clear browser data, as a *non-extractable* WebCrypto key:
+pages can sign with it, but no script, the page's own included, can read its
+bytes, so a script injected into the site could sign while it runs but could
+not copy the key away. The raw key exists only for a moment while it is locked
+for the profile or unlocked from it, and is wiped straight after. (Earlier
+versions kept it as hex in `localStorage`; the first page load moves such an
+entry into IndexedDB and deletes it.)
+
+### Or a Cardano wallet
+
+The sign-in panel's **Cardano wallet** tab (and the hub's "₳ Cardano wallet"
+button) is a second way in, for players who already have Eternl, Lace, Yoroi
+or any CIP-30 wallet. Type a call sign, pick the wallet; new or returning, it is
+the same two clicks:
+
+1. The page connects to the wallet (CIP-30 `enable`) and reads its stake
+   (reward) address, the same for all of the wallet's addresses.
+2. It makes this browser's **device key**: Ed25519, non-extractable, in
+   IndexedDB.
+3. The wallet signs one message with `signData`, shown in its own popup:
+   *Anchor Games: let this browser play as "ram" until 2026-12-09…*, with the
+   device key in it. No transaction, nothing spent, no key leaves the wallet.
+   That signature is the **device certificate**.
+4. A new call sign is claimed with `PUT_IF_ABSENT` as a *wallet profile*:
+   `{call sign, the wallet's public key, its address, the first certificate}`.
+   The certificate's wallet signature proves the wallet's holder claimed it.
+   There is no password and no locked key anywhere. For a call sign that
+   already exists, the page checks that the wallet that signed is the
+   profile's.
+
+From then on the device key does what a password commander's key does (signs
+the hourly delegation request and the session passes, and Land Rush claims),
+and the certificate travels with each signature, so the delegation service
+and every browser check *device key → wallet → profile*
+([`verifySigned`](shared/accounts.js)). CIP-8 signatures are checked with
+example 20's verifier ([`shared/cip8.js`](shared/cip8.js)), which also checks
+that the signing key's hash is the address's credential. The wallet is asked
+once per browser, not per game or per hour. On another browser, connect the
+wallet again: a new device key, a new certificate, the same commander.
+Certificates last 30 days; after that the page asks the wallet again.
+
+Both kinds of commander play side by side, and in a game both are just a call
+sign. One exception: the **duels plugin edition**, whose rules run in Java on
+the members and verify a commander key's signature on every move. A wallet
+commander has no such key in the browser (it would mean a wallet popup per
+move), so it is told to play the browser edition.
+
+To try it without a wallet extension, add `&mockwallet` on localhost
+(`http://localhost:8787/?proxy=1&mockwallet`): a stand-in CIP-30 wallet
+([`test/mock-wallet.js`](test/mock-wallet.js)) that answers `signData` with a
+real COSE_Sign1, minus the popup. Its key sits in `localStorage`; it is for
+tests only, and loads on a loopback host only.
 
 A game accepts a commander's first move only if the profile holds the move's
 key and was registered *before* the move. The two chains share no clock, so
@@ -151,6 +222,11 @@ member gives the same answer, and so does a replay.
    for nova in `games/galaxy/`". The pass travels inside every move, so every
    browser can tell who a session key belongs to. The credential cannot: it
    names a key, not a call sign.
+
+A wallet commander signs steps 2 and 3 with its device key and attaches its
+device certificate. The service checks the certificate is the profile's
+wallet's and has not expired; browsers check it was valid when the credential
+was issued.
 
 From then on every move is a core topic frame: the JSON move plus pass,
 signed by the session key alone. Over an hour the commander key signs two
@@ -392,6 +468,15 @@ first message opens it, and BLAKE2b of that block's state root generates the
 streets: bends, rolling hills, the traffic and the buildings along the road.
 Nobody can practise a circuit before that block exists.
 
+**Overtime.** A ride or race that begins before the circuit changes may finish
+after it: for a whole ride plus the grace (2:50) the old circuit still takes
+splits and runs, and nothing else (no new races, no joins, no opening an
+unopened circuit). A ride in overtime must have *begun* before the change:
+its message's ledger time, less the ridden time its replay confirms, less the
+twenty-second grace for landing, may not be after it. So you can start a ride
+until a few seconds before the circuit changes; the page keeps you on the old
+circuit until your ride is checked, then moves to the new one.
+
 **Inputs, not times.** [`moto/js/sim.js`](moto/js/sim.js) steps the bike at a
 fixed 60 Hz in integers from one input byte per frame. A finished ride submits
 those bytes (run-length encoded — about 2 KB for two laps) and the frame it
@@ -458,12 +543,49 @@ race too, so riders see each other on the road, but they stay advisory.
 | A rider arrives after the start | The page offers to ride at once, and says how late; the ride counts for the race if it still lands in its window (twenty seconds of slack), otherwise only for the season. |
 | The connection drops mid-ride | The ride goes on in the tab; at the finish the page keeps resubmitting until the race window closes. |
 | The tab closes mid-ride | The inputs lived in that tab; the rider is a DNF. Their other rides are unaffected. |
-| The season is about to change | A lobby can only be opened if its longest possible race ends within the season; the page says so and greys the button. |
+| The season is about to change | A race must *start* before the circuit changes (its lobby wait, twice if it waits once more, plus the lead), and finishes in overtime. The page greys the waits that no longer fit, and the button in the last few seconds. |
 
 Limits: at most eight races under way per season, eight riders per grid, and
 a lobby message is well under the game entry's 40 KB payload limit. Lobbies
 are per season, so the next circuit starts with none; the page lists races to
 come and under way, and the ones that ended in the last five minutes.
+
+#### Race a robot: one browser
+
+To show a race at one screen, add a **robot rider** to it. The first time,
+the page builds one for you: a second commander kept in this browser
+(`bot-<your call sign>`), with its own key, its profile on
+`authenticated-map-chain` and its own session key. It joins the grid with an
+ordinary `join`, and when the race starts it rides the circuit with the
+attract mode's autopilot. It posts its splits as it passes each checkpoint and
+its run once it has really crossed the line. Nothing about it is special to
+the ledger or to the other browsers: they see a rival on the grid, on the
+road and in the results (🤖 marks a `bot-` call sign), and its ride replays
+and proves like anyone's.
+
+1. Open `http://localhost:8787/moto/?proxy=1` and sign in.
+2. Under **Race together** pick the **Robot**'s skill (*easy* ≈ 45 s a ride,
+   *fair* ≈ 39 s, *fast* ≈ 35 s: it eases off the throttle on that share of
+   frames), then **Open a race**.
+3. On the race card press **🤖 Add robot**. The grid lists you and
+   🤖 bot-*you*. Press **Start now**, or wait for the close.
+4. Ride. The robot appears on your road from its splits, and the race card
+   fills in both places and times. Open the same page in any other browser,
+   signed in or not, and it shows the same race.
+
+The robot's ride is decided up front from the circuit, the skill and a
+per-ride salt; the page sends each move at the ledger time the ride reaches
+it. Because this page knows the whole ride, it shows the robot exactly, frame
+for frame, rather than estimated from splits as other browsers must. While
+you are not riding yourself, the page follows it with a **robot cam**: an
+amber bike with a green helmet, and the HUD shows its time. Other riders are
+drawn as solid bikes at your bike's scale, each in its own colors (amber for
+`bot-` riders); the ghosts of best rides stay translucent. It rides only while the page that keeps it is open: close the tab before
+the start and it is a DNF, like any rider who left. **Remove robot** takes it
+off an open grid, and **Clear browser data** forgets it. Run headless, a
+signed-in browser raced its *fair* robot (0:33.42 against 0:40.02) while a
+signed-out browser watched; both showed the same grid, both riders live, and
+the same result.
 
 #### Try it: two browsers, one race
 
@@ -573,7 +695,8 @@ agree on all of it (see [plugin/README.md](plugin/README.md)).
   the page extrapolates from their average speed until the next one, so a
   live rider can jump slightly when a split arrives. In a race, a rider
   without a split yet is drawn at your pace. As with the arcade, replay
-  cannot tell a human from a bot (`&autopilot` makes that plain).
+  cannot tell a human from a bot (`&autopilot` and the 🤖 robot rider make
+  that plain; the `bot-` prefix is only a name, not something the ledger checks).
 - **A race starts together only as well as the clocks agree.** The start is a
   ledger time; each page counts down to its estimate of it, which can be off
   by about the network latency. The window a race ride must land in absorbs
@@ -590,11 +713,18 @@ agree on all of it (see [plugin/README.md](plugin/README.md)).
   demo; a long-lived deployment would checkpoint.
 - **The locked key is public.** A weak password can be guessed offline, as
   with a leaked password hash; hence the 10-character minimum and 600,000
-  rounds. The unlocked key sits in `localStorage` on devices you sign in on.
+  rounds. On devices you sign in on, the unlocked key is non-extractable but
+  still usable by any script running on the site, and browsers do not encrypt
+  IndexedDB on disk: someone with this browser profile's files could recover it.
 - **The profile check can wait.** If a browser's view of the profile chain is
   behind a move, it pauses that game's replay and asks again; after six
   seconds it refuses the move. A browser that cannot see a just-registered
   profile for that long would diverge — a gap a game plugin would close.
+- **A wallet commander's device certificate cannot be revoked early.** It is
+  valid until it expires (30 days). A lost or compromised browser can play as
+  that commander until then, though its key cannot be copied out of the
+  browser. Revoking sooner needs profile updates, and profiles are revision 1
+  only. Hardware-wallet accounts may not support `signData` at all.
 - **Two devices, one commander.** Nonces come from each device's clock; a
   device whose clock is far behind will have its moves refused as stale.
 - **The delegation service is the publisher's gate.** It checks a commander's
@@ -615,7 +745,7 @@ agree on all of it (see [plugin/README.md](plugin/README.md)).
 ## Tests
 
 ```bash
-npm test                                          # 80 checks, no cluster needed
+npm test                                          # 90 checks, no cluster needed
 node --no-warnings test/duel-vectors.mjs          # rewrite the browser rules' duel vectors for the plugin
 (cd plugin && ./gradlew test)                     # the plugin agrees with them (6 tests)
 ```
@@ -630,7 +760,17 @@ for a fresh request from the profile's key, and refuses replayed, forged,
 borrowed, stale, unknown, out-of-scope and inactive-issuer requests. A page's
 `Moves` signs one login and one pass, then frames every move with the session
 key, and the frames open and apply in Galaxy. Every session game writes under
-its own registered entry. The rest cover the keystore; Galaxy's simulation (map determinism,
+its own registered entry. Wallet commanders, with the mock wallet: one
+signature claims a call sign and the profile holds no key; another browser of
+the same wallet gets its own device key; a device signature counts only with
+its wallet's certificate for that call sign and until it expires (a borrowed,
+stretched or someone else's certificate does not); a wallet pass opens as its
+commander in Galaxy and fits the topic's limit; the service issues to a
+wallet's device and refuses a bare device key, an expired certificate, the
+wallet key without a certificate and a password profile with one; a page
+signs once with the wallet and never again; and Land Rush takes a wallet
+commander's claims while scorching borrowed and expired certificates. The
+commander key, created or unlocked, cannot be exported. The rest cover the keystore; Galaxy's simulation (map determinism,
 production, arrivals, captures, forged and replayed moves, the cross-chain
 profile check, round boundaries, the per-block cap, two replays reaching the
 same winner); and the Arcade (the sine table, input encoding, identical
@@ -659,8 +799,11 @@ start a fixed lead after the close and the same in two independent folds,
 duplicate joins, a full grid, one race at a time, stale nonces, the host's
 early start, the three answers to a solo lobby, leaving and the host's leave
 cancelling, race rides placed by ridden time while a jump start, a missed
-start and a rider off the grid count for the season only, DNFs, and a race
-that would outlast its season).
+start and a rider off the grid count for the season only, DNFs, a race that
+would start after the circuit changes refused while one starting as it changes
+finishes and counts in overtime, and overtime itself: a ride begun before the
+change counts after it, one begun after it does not, and no lobby, join or
+opening lands in overtime).
 
 ## Files
 
@@ -672,7 +815,8 @@ shared/                       what every game uses
   sessions.js                 session keys: credentials, passes, openMove (verify a move), Moves (read and write)
   moves.js                    what a game's rules use: moveBody and authentic
   topic-client/               the release's browser topic client (frames, credentials), copied unchanged
-  accounts.js                 PBKDF2 + AES-GCM keystore, profiles
+  accounts.js                 PBKDF2 + AES-GCM keystore, wallet profiles and device certificates, profiles
+  wallet.js, cip8.js          CIP-30 wallets: connect, certify a device key; CIP-8 verification (from example 20)
   profiles.js                 profile lookup, registration, the cross-chain check
   proofs.js                   typed proofs, profile proofs, authorship (session, credential, pass), the anchored root
   ledger.js                   REST client: by-topic, blocks, submit, SSE, plugin routes
@@ -693,7 +837,8 @@ derby/                        Comet Derby: derby.js (the race, bets, beacons, pa
 reef/                         Reef: reef.js (the world rules, placements, the timeline), render.js
                               (glowing cells, population chart), app.js, proofs.js (placement and world proofs)
 moto/                         Neon Rush: sim.js (the bike, traffic and circuit generator), races.js (rides,
-                              splits, leaderboard), render.js (the pseudo-3D city), app.js, proofs.js
+                              splits, leaderboard, race lobbies), robot.js (the robot rider),
+                              render.js (the pseudo-3D city), app.js, proofs.js
 sonar/                        Deep Sonar: sonar.js (fleet commitments, Merkle answers, lobby, battle),
                               render.js (your sea and the sonar screen), app.js, proofs.js (shot and battle proofs)
 delegation/                   the game publisher's side: service.mjs (who gets a credential), server.mjs
@@ -702,5 +847,6 @@ serve.mjs                     static server + same-origin proxy; --local adds th
 cluster, chain/               the local application: games.template.yaml, sealed and run with yano.sh appchain
 ADD_A_CHAIN.md                historical (0.1.0-pre2): how duels-chain joined a running pre2 cluster
 test/run.mjs                  npm test
+test/mock-wallet.js           a stand-in CIP-30 wallet for tests and ?mockwallet on localhost
 test/duel-vectors.mjs         the shared duel vectors for the plugin's tests
 ```

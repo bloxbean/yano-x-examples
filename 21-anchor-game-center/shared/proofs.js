@@ -52,8 +52,10 @@ export async function authorshipChecks(moves, message, expectId, expectPub, lega
     checks: [
       { ok: true, text: `signed by session key ${short(a.session)} — a non-extractable key that never left the player’s browser` },
       { ok: true, text: `the game publisher’s issuer ${short(a.issuer)} delegated that key for ${moves.cfg.scope}, until ${clock(a.until)}; every member checked it before storing the move` },
-      { ok: a.id === expectId && a.pub === expectPub,
-        text: `${a.id}’s commander key ${short(a.pub)} signed the session pass that binds the key to ${a.id}` },
+      { ok: a.id === expectId && a.pub === expectPub, text: a.device
+        ? `${a.id}’s device key ${short(a.device)} signed the session pass that binds the key to ${a.id}; `
+          + `${a.id}’s Cardano wallet ${short(a.pub)} certified that device until ${new Date(a.certUntil).toLocaleDateString()}`
+        : `${a.id}’s commander key ${short(a.pub)} signed the session pass that binds the key to ${a.id}` },
     ],
   };
 }
@@ -90,14 +92,18 @@ export async function proveProfile(ledger, profiles, id, { threshold, expectPub 
   if (!proof?.proof) return { checks: [{ ok: false, text: 'the member returned no proof' }] };
   const fields = proof.fact?.fields ?? {};
   const checks = [
-    { ok: !!found.profile, text: `the profile is self-signed by its key ${found.profile?.pub.slice(0, 10) ?? ''}…` },
+    { ok: !!found.profile, text: found.profile?.v === 2
+      ? `the profile is signed by a Cardano wallet, key ${found.profile.pub.slice(0, 10)}… (CIP-8, bound to its address)`
+      : `the profile is self-signed by its key ${found.profile?.pub.slice(0, 10) ?? ''}…` },
     { ok: proof.claimResult?.satisfied === true && fields.status === 'ACTIVE',
       text: `the ledger holds it at revision ${fields.revision}, ${String(fields.status).toLowerCase()} — first come, never replaced` },
     { ok: fields['value-digest'] === logicalValueHash(found.value),
       text: 'the proven value is exactly the profile checked above (value digest matches)' },
   ];
   if (expectPub) {
-    checks.push({ ok: found.profile?.pub === expectPub, text: 'it is the key this commander signs moves with' });
+    checks.push({ ok: found.profile?.pub === expectPub, text: found.profile?.v === 2
+      ? 'it is the wallet that certified the device keys this commander signs with'
+      : 'it is the key this commander signs moves with' });
   }
   checks.push(...rootChecks(proof, anchor, sealed, threshold));
   return { sealed, anchor, checks, trust: proof.trust,

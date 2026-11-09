@@ -16,7 +16,7 @@ import { Arena } from './render.js';
 import { proveDuel, proveRound } from './proofs.js';
 import { applyProxy, withQuery } from '../../shared/config.js';
 import { Ledger } from '../../shared/ledger.js';
-import { Session } from '../../shared/auth.js';
+import { Session, keyLabel } from '../../shared/auth.js';
 import { ProofPanel, esc, reportReachability, toast } from '../../shared/ui.js';
 import { ed25519Supported, randomBytes, toHex } from '../../shared/crypto.js';
 import { connectMoves, showSession } from '../../shared/sessions.js';
@@ -81,6 +81,12 @@ async function submit(topic, move) {
 
 /** The plugin edition's members check the commander's own signature, `sig`; the browser edition needs none. */
 async function withSig(c, move, ...fields) {
+  if (PLUGIN && c.wallet) {
+    // The members' Java rules verify the commander key itself, and a wallet commander has none
+    // in the browser: its wallet would have to pop up for every move. The browser edition works.
+    throw new Error('a wallet commander plays the browser edition: the plugin edition’s members check '
+      + 'a commander key signature on every move');
+  }
   return PLUGIN ? { ...move, sig: await c.sign(statement(CONFIG, ...fields)) } : move;
 }
 
@@ -526,7 +532,7 @@ function renderSide() {
   if (c) {
     $('avatar').textContent = c.id[0];
     $('me-name').textContent = c.id;
-    $('me-key').textContent = `key ${c.pub.slice(0, 6)}…${c.pub.slice(-4)}`;
+    $('me-key').textContent = keyLabel(c);
     showSession($('me-key'), moves);
   }
 }

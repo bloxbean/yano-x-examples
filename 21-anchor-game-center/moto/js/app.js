@@ -9,11 +9,12 @@ import { CONFIG } from './config.js';
 import { BRAKE, CHECKPOINTS, FPS, LAP, LAPS, LEFT, MAX_FRAMES, RIGHT, Run, THROTTLE, Track, autopilot, lapTime } from './sim.js';
 import { Circuit, lobbyPhase, raceStandings, seasonOf, seasonTopic } from './races.js';
 import { Renderer } from './render.js';
+import { Robot, SKILLS, isRobot } from './robot.js';
 import { proveRun } from './proofs.js';
 import { encodeInputs } from '../../arcade/js/runs.js';
 import { applyProxy, withQuery } from '../../shared/config.js';
 import { Ledger } from '../../shared/ledger.js';
-import { Session } from '../../shared/auth.js';
+import { Session, keyLabel } from '../../shared/auth.js';
 import { ProofPanel, esc, reportReachability, toast, txLink } from '../../shared/ui.js';
 import { blake2b } from '../../shared/blake2b.js';
 import { ed25519Supported, toHex, utf8 } from '../../shared/crypto.js';
@@ -58,6 +59,10 @@ const ui = {
 };
 let circuit = null;
 let stopWatch = null;
+// Race a robot: a second rider this browser keeps, so one screen can show a real race.
+const robot = new Robot({ cfg: CONFIG, ledger, profiles: session.profiles, topics: moves.topics,
+  relay: () => session.relay, now: () => ledgerNow(), onEvent: (text) => toast(text, 'info') });
+const riderName = (id) => `${isRobot(id) ? '🤖 ' : ''}${esc(id)}`;
 const me = () => session.commander?.id ?? null;
 const nextNonce = () => (ui.nonce = Math.max(Date.now(), ui.nonce + 1));
 /** Now, in ledger time: lobbies close and races start at block timestamps, not at this browser's clock. */
@@ -120,7 +125,7 @@ function onApplied(entry, result) {
   if (lobbyMove) {
     ui.pendingLobby.delete(entry.messageId);
     if (!result.accepted) toast(`Your ${lobbyMove} was refused: ${result.reason}`, 'info');
-    else if (lobbyMove === 'race') toast('Race open — share the page; riders join from “Race together”', 'info');
+    else if (lobbyMove === 'race') toast('Race open — add a 🤖 robot, or share the page: riders join from “Race together”', 'info');
   }
   const pending = ui.pendingRun;
   if (pending && pending.messageId === entry.messageId) pending.resolve({ entry, result });
@@ -171,7 +176,13 @@ async function ensureOpen() {
 async function play(race = null) {
   const c = session.commander;
   if (!c) { session.open(); return; }
-  if (!race && circuit.end - Date.now() < 160_000) { toast('This season ends too soon for a full ride — wait for the next circuit', 'info'); return; }
+  // A ride begun before the circuit changes may finish in overtime; only its last seconds are off limits,
+  // so the start (and, for an unopened circuit, its opening) lands before the change.
+  if (!race && circuit.end - Date.now() < 5_000) {
+    toast(circuit.end > Date.now() ? 'The circuit changes in a few seconds: ride the next one'
+      : 'A new circuit is open: close the replay to switch to it', 'info');
+    return;
+  }
   // A race's season is open already; without an await here, joining the grid is immediate.
   if (!race && !(await ensureOpen())) return;
   $('end').hidden = true;
@@ -235,7 +246,7 @@ function holdGrid() {
   if (left > 0) {
     cd.textContent = left <= 3000 ? String(Math.ceil(left / 1000)) : '';
     cd.hidden = left > 3000;
-    const others = mine.members.filter((m) => m.id !== me()).map((m) => esc(m.id));
+    const others = mine.members.filter((m) => m.id !== me()).map((m) => riderName(m.id));
     $('grid-card').innerHTML = `Race <b>${shortRace(mine.id)}</b> · starts in <b>${mmss(left)}</b><br>`
       + (others.length ? `on the grid with ${others.join(', ')}` : 'riding alone — the clock is your rival');
     $('grid-card').hidden = false;
@@ -315,6 +326,23 @@ function liveRiders() {
   return riders;
 }
 
+/**
+ * The riders to draw on the road: the live ones, with this browser's own robot placed
+ * exactly from the ride it decided (no estimate). `cam` is a robot ride the camera follows.
+ */
+function ridersOnRoad(cam) {
+  const bot = robot.live(ledgerNow());
+  const riders = liveRiders().filter((r) => !bot || r.name !== bot.id);
+  if (bot && !cam) riders.push({ name: bot.id, z: bot.run.z, x: bot.run.x, race: bot.race });
+  return riders;
+}
+
+/** Robot cam: while you are not riding, follow your robot's race from its exact ride. */
+function robotCam() {
+  if (ui.mode !== 'attract' || !$('end').hidden) return null;
+  return robot.live(ledgerNow());
+}
+
 let last = performance.now();
 let acc = 0;
 function loop(t) {
@@ -324,9 +352,10 @@ function loop(t) {
   while (acc >= STEP_MS && steps < 8) { stepOnce(); acc -= STEP_MS; steps++; }
   if (steps === 8) acc = 0;
   if (ui.mode === 'grid') holdGrid();
-  const live = ui.mode === 'play' || ui.mode === 'attract' || ui.mode === 'grid' ? liveRiders() : [];
-  renderer.frame({ run: ui.run, ghosts: ui.mode === 'watch' ? [] : ui.ghosts, live, now: t });
-  renderHud();
+  const cam = robotCam();
+  const live = ui.mode === 'play' || ui.mode === 'attract' || ui.mode === 'grid' ? ridersOnRoad(cam) : [];
+  renderer.frame({ run: cam?.run ?? ui.run, ghosts: ui.mode === 'watch' || cam ? [] : ui.ghosts, live, now: t, rider: cam?.id });
+  renderHud(cam);
   requestAnimationFrame(loop);
 }
 
@@ -466,6 +495,25 @@ async function lobbyAction(t, fields) {
   }
 }
 
+/** Put this browser's robot on a grid, or take it off. */
+async function robotAction(act, race) {
+  const c = session.commander;
+  if (!c) { session.open(); return; }
+  const sent = Date.now();
+  const building = !robot.id;
+  try {
+    const pending = act === 'robot-join' ? robot.join(circuit, race, c.id, session.relay) : robot.leave(circuit, race);
+    if (building) renderLobbies(); // "Building robot…"
+    const { messageId } = await pending;
+    ui.probes.set(messageId, sent);
+    ui.pendingLobby.set(messageId, act === 'robot-join' ? 'robot’s join' : 'robot’s leave');
+    sync();
+  } catch (error) {
+    toast(`Could not ${act === 'robot-join' ? 'add' : 'remove'} the robot: ${error.message}`, 'info');
+  }
+  renderLobbies();
+}
+
 /** The race you are on the grid of and have not finished: { lobby, phase } or null. */
 const myRace = () => (circuit?.seed && me() ? circuit.raceOf(me(), ledgerNow()) : null);
 
@@ -484,12 +532,27 @@ function renderLobbies() {
   const now = ledgerNow();
   const mine = myRace();
   const c = session.commander;
-  const fits = circuit.end - now >= RACE.waits[0] + RACE.leadMs + 150_000 + RACE.graceMs;
+  // A race must start before the circuit changes (overtime lets it finish after): a lobby's wait,
+  // twice if it waits once more for riders, plus the lead to the start, and a margin to land.
+  const startsIn = (wait) => wait * ($('lobby-alone').value === 'wait' ? 2 : 1) + RACE.leadMs + 3_000;
+  const shortest = startsIn(RACE.waits[0]);
+  const left = circuit.end - now;
+  const fits = left >= shortest;
+  const waits = [...$('lobby-wait').options];
+  waits.forEach((o) => { o.disabled = left < startsIn(Number(o.value)); });
+  if ($('lobby-wait').selectedOptions[0]?.disabled) {
+    const longest = waits.filter((o) => !o.disabled).pop();
+    if (longest) $('lobby-wait').value = longest.value;
+  }
   const idle = ui.mode === 'attract' || ui.mode === 'watch';
   $('lobby-create').disabled = !c || !!mine || !fits || !idle;
   $('lobby-note').textContent = !c ? 'Sign in to open or join a race.'
-    : mine ? `You are on the grid of race ${shortRace(mine.lobby.id)}.`
-    : !fits ? 'Too close to the season change for a race — the next circuit opens soon.' : '';
+    : mine ? (mine.phase.state === 'open' ? `You are on the grid of race ${shortRace(mine.lobby.id)}.`
+      : `You are in race ${shortRace(mine.lobby.id)}; open another once it ends, in ${mmss(mine.phase.endsAt - now)}.`)
+    : !fits ? (left > 0
+      ? `A race must start before the circuit changes, so none opens in its last ${mmss(shortest)}. The next circuit opens in ${mmss(left)}.`
+      : 'A new circuit is open: close the replay to switch to it.')
+    : !idle ? 'Finish your ride to open a race.' : '';
   // Races still to come or under way, then the last few that ended in the past five minutes.
   const shown = circuit.races(now).filter(({ phase }) => phase.state !== 'finished' && phase.state !== 'cancelled'
     || now - phase.endsAt < 300_000).slice(0, 8);
@@ -500,13 +563,19 @@ function renderLobbies() {
       if (!onGrid && lobby.members.length < lobby.max && !mine && idle) acts.push(`<button class="btn primary" data-act="join" data-race="${lobby.id}">Join</button>`);
       if (onGrid && lobby.host === me()) acts.push(`<button class="btn" data-act="start" data-race="${lobby.id}">Start now</button>`);
       if (onGrid) acts.push(`<button class="btn" data-act="leave" data-race="${lobby.id}">${lobby.host === me() ? 'Cancel race' : 'Leave'}</button>`);
+      const botHere = robot.id && lobby.members.some((m) => m.id === robot.id);
+      if (botHere) acts.push(`<button class="btn" data-act="robot-leave" data-race="${lobby.id}">Remove robot</button>`);
+      else if (lobby.members.length < lobby.max && !robot.race(circuit)) {
+        acts.push(`<button class="btn" data-act="robot-join" data-race="${lobby.id}" ${robot.busy ? 'disabled' : ''}
+          title="A second rider this browser keeps, with its own call sign and session key">${robot.busy ? 'Building robot…' : '🤖 Add robot'}</button>`);
+      }
     }
     const results = phase.state === 'racing' || phase.state === 'finished'
       ? `<ol class="result">${raceStandings(CONFIG, lobby, now).map((r) => `<li>
-          <span>${r.place ?? '–'}</span><span class="${r.status === 'dnf' ? 'dnf' : ''}">${esc(r.id)}</span>
+          <span>${r.place ?? '–'}</span><span class="${r.status === 'dnf' ? 'dnf' : ''}">${riderName(r.id)}</span>
           <span class="t">${r.run ? lapTime(r.run.frames) : r.status === 'dnf' ? 'DNF' : '…'}</span>
           ${r.run ? `<button data-race-run="${lobby.id}:${esc(r.id)}" title="Watch this ride">▶</button>` : '<span></span>'}</li>`).join('')}</ol>`
-      : `<div class="riders">${lobby.members.map((m) => `<span class="rider ${m.id === me() ? 'me' : ''}">${esc(m.id)}${m.id === lobby.host ? ' ★' : ''}</span>`).join('')}
+      : `<div class="riders">${lobby.members.map((m) => `<span class="rider ${m.id === me() ? 'me' : ''}">${riderName(m.id)}${m.id === lobby.host ? ' ★' : ''}</span>`).join('')}
           <span class="small">${lobby.members.length}/${lobby.max}</span></div>`;
     return `<li class="${onGrid ? 'mine' : ''}">
       <div class="head"><b>Race ${shortRace(lobby.id)}</b><span class="small">by ${esc(lobby.host)}</span>
@@ -526,7 +595,7 @@ function renderPromptRace() {
   if (!mine || ui.mode !== 'attract') { box.hidden = true; $('play').hidden = false; return; }
   const { lobby, phase } = mine;
   if (phase.state === 'countdown') { play(lobby.id); return; }
-  const others = lobby.members.filter((m) => m.id !== me()).map((m) => esc(m.id));
+  const others = lobby.members.filter((m) => m.id !== me()).map((m) => riderName(m.id));
   if (phase.state === 'open') {
     $('play').hidden = true;
     box.innerHTML = `On the grid of race <b>${shortRace(lobby.id)}</b> · closes in <b>${mmss(phase.closesAt - now)}</b><br>
@@ -545,15 +614,16 @@ function renderPromptRace() {
 
 // ---------------------------------------------------------------- panels
 
-function renderHud() {
-  const riding = ui.mode === 'play' || ui.mode === 'countdown' || ui.mode === 'watch' || ui.mode === 'grid';
+function renderHud(cam = null) {
+  const riding = ui.mode === 'play' || ui.mode === 'countdown' || ui.mode === 'watch' || ui.mode === 'grid' || !!cam;
   if (ui.mode !== 'grid') $('grid-card').hidden = true;
   $('hud').hidden = !riding;
-  $('prompt').hidden = ui.mode !== 'attract' || !$('end').hidden;
-  $('watching').hidden = ui.mode !== 'watch';
+  $('prompt').hidden = ui.mode !== 'attract' || !$('end').hidden || !!cam;
+  $('watching').hidden = ui.mode !== 'watch' && !cam;
   if (ui.mode === 'watch') $('watching').textContent = `▶ replaying ${ui.watching.id}’s ride from the ledger`;
+  else if (cam) $('watching').textContent = `🤖 robot cam: ${cam.id} racing ${shortRace(cam.race)} live — its exact ride, frame for frame`;
   $('touch').hidden = ui.mode !== 'play' || !matchMedia('(pointer: coarse)').matches;
-  const r = ui.run;
+  const r = cam?.run ?? ui.run;
   $('kmh').textContent = String((r.v >> 4) * 2);
   $('time').textContent = lapTime(r.frame);
   $('lap').textContent = `LAP ${r.lap}/${LAPS}`;
@@ -566,7 +636,11 @@ function renderTop() {
   const left = Math.max(0, circuit.end - Date.now());
   const mm = `${Math.floor(left / 60_000)}:${String(Math.floor((left % 60_000) / 1000)).padStart(2, '0')}`;
   const label = circuit.season % 100000;
-  $('season').innerHTML = circuit.seed
+  const overtime = Date.now() >= circuit.end;
+  $('season').innerHTML = overtime
+    ? `Season <b>${label}</b> · <b>overtime</b>: rides begun on this circuit can still finish and count, for `
+      + `<b>${mmss(circuit.closes - Date.now())}</b> · the next circuit opens once you are done`
+    : circuit.seed
     ? `Season <b>${label}</b> · circuit from block <b>#${circuit.seededBy.height}</b> · seed <b>${circuit.seed.slice(0, 8)}…</b> · next circuit in <b>${mm}</b>`
     : `Season <b>${label}</b> · not opened yet · next circuit in <b>${mm}</b>`;
   $('prompt-field').innerHTML = circuit.seed
@@ -607,7 +681,7 @@ function renderSide() {
   if (c) {
     $('avatar').textContent = c.id[0];
     $('me-name').textContent = c.id;
-    $('me-key').textContent = `key ${c.pub.slice(0, 6)}…${c.pub.slice(-4)}`;
+    $('me-key').textContent = keyLabel(c);
     showSession($('me-key'), moves);
   }
 }
@@ -660,12 +734,15 @@ $('play').addEventListener('click', () => {
 $('lobby-wait').innerHTML = RACE.waits.map((w) => `<option value="${w}" ${w === 30_000 ? 'selected' : ''}>${w / 1000} s</option>`).join('');
 $('lobby-max').innerHTML = Array.from({ length: RACE.maxRiders - 1 }, (_, i) => i + 2)
   .map((n) => `<option value="${n}" ${n === 4 ? 'selected' : ''}>${n}</option>`).join('');
+$('robot-skill').innerHTML = Object.keys(SKILLS).map((k) => `<option value="${k}" ${k === robot.skill ? 'selected' : ''}>${k}</option>`).join('');
+$('robot-skill').addEventListener('change', (e) => robot.setSkill(e.target.value));
 $('lobby-create').addEventListener('click', () => lobbyAction('lobby', {
   wait: Number($('lobby-wait').value), max: Number($('lobby-max').value), alone: $('lobby-alone').value,
 }));
 $('lobbies').addEventListener('click', (e) => {
   const { act, race, raceRun } = e.target.dataset ?? {};
-  if (act) lobbyAction(act, { race });
+  if (act === 'robot-join' || act === 'robot-leave') robotAction(act, race);
+  else if (act) lobbyAction(act, { race });
   if (raceRun) {
     const [id, rider] = raceRun.split(':');
     const run = circuit.lobbies.get(id)?.results.get(rider);
@@ -700,17 +777,20 @@ if (!(await ed25519Supported())) {
   $('banner').textContent = 'This browser has no Ed25519 in WebCrypto. Use a current Chrome, Edge, Firefox or Safari.';
   $('banner').hidden = false;
 }
-session.onChange(() => { renderSide(); renderTop(); renderBoard(); renderLobbies(); });
+session.onChange(() => { renderSide(); renderTop(); renderBoard(); renderLobbies();
+  robot.load(me()).then(renderLobbies, () => {}); });
 await session.restore();
 renderSide();
 requestAnimationFrame(loop);
 await Promise.all([refreshMeta(), enterSeason(seasonOf(CONFIG, Date.now()))]);
 setInterval(() => {
   const now = Date.now();
-  if (seasonOf(CONFIG, now) !== circuit.season && ui.mode === 'attract' && !ui.pendingRun && !myRace()) {
+  if (seasonOf(CONFIG, now) !== circuit.season && ui.mode === 'attract' && !ui.pendingRun && !myRace() && !robot.race(circuit)) {
     toast('A new city circuit is open', 'info');
+    robot.stop();
     enterSeason(seasonOf(CONFIG, now));
   }
+  if (circuit) robot.tick(circuit);
   renderTop();
   renderLive();
   renderLobbies();

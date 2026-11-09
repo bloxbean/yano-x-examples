@@ -64,6 +64,12 @@ export const lobbyStatement = (cfg, season, b) =>
 /** The longest a ride can take; a race ends this long (plus the grace) after its start. */
 export const RIDE_MS = (MAX_FRAMES * 1000) / FPS;
 
+/**
+ * Overtime: after a circuit changes, it still takes splits and runs for this long, so a ride
+ * or a race that began on it can finish and count. Nothing else: no new races, no joins.
+ */
+export const overtimeMs = (cfg) => RIDE_MS + cfg.race.graceMs;
+
 const reject = (reason) => ({ accepted: false, reason });
 const ACTIVE = new Set(['open', 'countdown', 'racing']);
 
@@ -117,6 +123,7 @@ export class Circuit {
     this.season = season;
     this.start = season * cfg.seasonMs;
     this.end = this.start + cfg.seasonMs;
+    this.closes = this.end + overtimeMs(cfg); // the last moment a ride begun here may land
     this.seed = null; // hex, once the season's first message is final
     this.track = null;
     this.seededBy = null;
@@ -142,8 +149,10 @@ export class Circuit {
     }
     const body = moveBody(this.cfg, entry);
     let result;
-    if (entry.timestamp < this.start || entry.timestamp >= this.end) {
+    if (entry.timestamp < this.start || entry.timestamp >= this.closes) {
       result = reject('outside this season');
+    } else if (entry.timestamp >= this.end && (!this.seed || (body?.t !== 'run' && body?.t !== 'split'))) {
+      result = reject('after the circuit changed: only rides begun on it may still finish');
     } else {
       let opened = false;
       if (!this.seed) {
@@ -170,6 +179,7 @@ export class Circuit {
       return reject('malformed split');
     }
     if (this.keys.has(b.id) && this.keys.get(b.id) !== b.pub) return reject('not this rider’s key');
+    if (this.#begunAfterChange(entry, b.frame)) return reject('a ride begun after the circuit changed');
     if (b.n <= (this.splitNonces.get(b.id) ?? 0)) return reject('stale split');
     const ok = await authentic(this.cfg, entry, b, b.pub, splitStatement(this.cfg, this.season, b.id, b.n, b.run, b.cp, b.frame));
     if (!ok) return reject('split signature does not verify');
@@ -187,6 +197,8 @@ export class Circuit {
       return reject('malformed run');
     }
     if (b.seed !== this.seed) return reject('ridden on another circuit');
+    // The claimed time is checked by replay below, so a ride cannot pretend it began earlier.
+    if (this.#begunAfterChange(entry, b.frames)) return reject('a ride begun after the circuit changed');
     let encoded;
     let frames;
     try {
@@ -217,6 +229,15 @@ export class Circuit {
     if (personalBest) this.best.set(b.id, run);
     const race = b.race === undefined ? null : this.#raceRide(entry, b, run);
     return { accepted: true, kind: 'run', run, personalBest, race };
+  }
+
+  /**
+   * In overtime, did this ride begin after the circuit changed? Its start is the message's ledger
+   * time less the ridden time it claims; the race grace covers the time to submit and finalize.
+   */
+  #begunAfterChange(entry, frames) {
+    return entry.timestamp >= this.end
+      && entry.timestamp - (frames * 1000) / FPS - this.cfg.race.graceMs > this.end;
   }
 
   /** A verified run tagged with a race: does it count for that race? It counts for the season either way. */
@@ -263,8 +284,9 @@ export class Circuit {
       if (b.t === 'lobby') {
         const active = [...this.lobbies.values()].filter((l) => ACTIVE.has(lobbyPhase(this.cfg, l, ts).state));
         if (active.length >= race.maxOpen) return 'too many races under way this season';
-        const longest = ts + b.wait * (b.alone === 'wait' ? 2 : 1) + race.leadMs + RIDE_MS + race.graceMs;
-        if (longest > this.end) return 'too close to the season change: the race would not end in this season';
+        // It must start before the circuit changes; overtime lets it finish after.
+        const latestStart = ts + b.wait * (b.alone === 'wait' ? 2 : 1) + race.leadMs;
+        if (latestStart > this.end) return 'too close to the circuit change: the race would not start before it';
       } else if (b.t === 'join') {
         if (phase.state !== 'open') return phase.state === 'cancelled' ? 'the race was cancelled' : 'the lobby has closed';
         if (lobby.members.some((m) => m.id === b.id)) return 'already on this grid';

@@ -26,8 +26,8 @@
 
 import { decode } from '../../shared/cbor.js';
 import { blake2b } from '../../shared/blake2b.js';
-import { ed25519Verify, fromHex, toHex, utf8 } from '../../shared/crypto.js';
-import { readProfile } from '../../shared/accounts.js';
+import { fromHex, toHex, utf8 } from '../../shared/crypto.js';
+import { readProfile, verifySigned } from '../../shared/accounts.js';
 
 const OP_PUT = 0;
 const OP_PUT_IF_ABSENT = 1;
@@ -227,15 +227,17 @@ export class Land {
       return scorch('the claim is not readable');
     }
     if (claim?.v !== 1 || typeof claim.id !== 'string' || !CALLSIGN.test(claim.id) || typeof claim.pub !== 'string'
-        || !HEX64.test(claim.pub) || typeof claim.sig !== 'string' || !HEX128.test(claim.sig)) {
+        || !HEX64.test(claim.pub) || typeof claim.sig !== 'string' || !HEX128.test(claim.sig)
+        || Object.keys(claim).some((k) => !['v', 'id', 'pub', 'sig', 'cert'].includes(k))) {
       return scorch('the claim is malformed');
     }
     const profile = await this.#profile(claim.id);
     if (!profile) return scorch(`${claim.id} had no profile before this claim`);
     if (profile.pub !== claim.pub) return scorch(`the key is not ${claim.id}’s`);
     const statement = claimStatement(this.cfg, this.season, this.seed, c, r, claim.id);
-    if (!(await ed25519Verify(fromHex(claim.pub), fromHex(claim.sig), utf8(statement)))) {
-      return scorch('the signature does not verify');
+    // A wallet commander signs with a device key its wallet certified, valid when the claim landed.
+    if (!(await verifySigned(this.accounts, claim, statement, entry.timestamp))) {
+      return scorch(claim.cert ? 'not signed by a device its wallet certified' : 'the signature does not verify');
     }
 
     const st = this.cfg.stamina;

@@ -7,7 +7,9 @@
 // A free tile has no entry: the member proves its absence under the anchored
 // root — an exclusion proof, not just an empty answer.
 
-import { ed25519Verify, fromHex, toHex, utf8 } from '../../shared/crypto.js';
+import { toHex, utf8 } from '../../shared/crypto.js';
+import { ACCOUNTS } from '../../shared/config.js';
+import { verifySigned } from '../../shared/accounts.js';
 import { ENTRY_SUBJECT, logicalValueHash, rootChecks, typedProof } from '../../shared/proofs.js';
 import { claimStatement, tileKey } from './land.js';
 
@@ -35,15 +37,17 @@ export async function proveTile(cfg, ledger, land, c, r, { threshold } = {}) {
   const fields = proof.fact?.fields ?? {};
   let claim = null;
   try { claim = JSON.parse(new TextDecoder().decode(tile.value)); } catch { /* scorched, unreadable */ }
-  const signed = !!claim && await ed25519Verify(fromHex(claim.pub), fromHex(claim.sig),
-    utf8(claimStatement(cfg, land.season, land.seed, c, r, claim.id)));
+  const signed = !!claim && await verifySigned(ACCOUNTS, claim,
+    claimStatement(cfg, land.season, land.seed, c, r, claim.id));
   const checks = [
     { ok: proof.claimResult?.satisfied === true && fields.status === 'ACTIVE',
       text: `the ledger holds this tile at revision ${fields.revision} — the first and only claim` },
     { ok: fields['value-digest'] === logicalValueHash(tile.value),
       text: 'the proven value is exactly the claim this browser checked (value digest matches)' },
     tile.owner
-      ? { ok: signed, text: `the claim is signed by ${tile.owner}’s commander key` }
+      ? { ok: signed, text: claim?.cert
+        ? `the claim is signed by a device key that ${tile.owner}’s Cardano wallet certified`
+        : `the claim is signed by ${tile.owner}’s commander key` }
       : { ok: true, text: `scorched: ${tile.reason} — so it counts for nobody` },
     ...rootChecks(proof, anchor, sealed, threshold),
   ];

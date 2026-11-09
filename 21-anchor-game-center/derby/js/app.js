@@ -9,7 +9,7 @@ import { Renderer } from './render.js';
 import { proveRace } from './proofs.js';
 import { applyProxy, withQuery } from '../../shared/config.js';
 import { Ledger } from '../../shared/ledger.js';
-import { Session } from '../../shared/auth.js';
+import { Session, keyLabel } from '../../shared/auth.js';
 import { ProofPanel, esc, reportReachability, toast } from '../../shared/ui.js';
 import { ed25519Supported, fromHex } from '../../shared/crypto.js';
 import { connectMoves, showSession } from '../../shared/sessions.js';
@@ -280,7 +280,7 @@ function render() {
   if (c) {
     $('avatar').textContent = c.id[0];
     $('me-name').textContent = c.id;
-    $('me-key').textContent = `key ${c.pub.slice(0, 6)}…${c.pub.slice(-4)}`;
+    $('me-key').textContent = keyLabel(c);
     showSession($('me-key'), moves);
   }
   $('credits').textContent = c ? (shownCredits(c.id) - pendingStake()).toLocaleString() : '—';

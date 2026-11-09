@@ -6,16 +6,17 @@
 // It signs only when:
 //   - the request is well formed, for this chain, generation and one of the games;
 //   - it is fresh (a 60-second window) and its nonce was not used before;
-//   - the commander key signed it;
+//   - the commander key signed it, or, for a wallet commander, a device key
+//     whose certificate that commander's wallet signed and which has not expired;
 //   - that key is the commander's profile on authenticated-map-chain: present,
 //     at revision 1, self-signed — read from a member the operator trusts, never
 //     from the request;
 //   - the issuer is still a delegator for that scope in the committed registry.
 
-import { readProfile } from '../shared/accounts.js';
+import { readProfile, verifySigned } from '../shared/accounts.js';
 import { ACCOUNTS } from '../shared/config.js';
 import { SESSION_MS, isGameScope, requestStatement } from '../shared/sessions.js';
-import { hex, issueDelegation, unhex, verifySignature } from '../shared/topic-client/topics.mjs';
+import { hex, issueDelegation, unhex } from '../shared/topic-client/topics.mjs';
 
 export class DelegationError extends Error {
   constructor(code, status = 400) { super(code); this.code = code; this.status = status; }
@@ -49,9 +50,7 @@ export function createDelegationService({ chainId, generationId, scopes, issuer,
     if (!allowed.has(request.scope)) refuse('DELEGATION_SCOPE_UNKNOWN');
     const time = now();
     if (request.issuedAt > time + 1000 || request.expiresAt <= time) refuse('DELEGATION_REQUEST_EXPIRED');
-    if (!(await verifySignature(unhex(request.pub, 32), unhex(request.sig, 64), new TextEncoder().encode(statement)))) {
-      refuse('DELEGATION_AUTHENTICATION_FAILED', 401);
-    }
+    if (!(await verifySigned(ACCOUNTS, request, statement, time))) refuse('DELEGATION_AUTHENTICATION_FAILED', 401);
     const found = await lookupProfile(request.id);
     if (!found?.present || found.status !== 0 || found.revision !== 1
         || !Number.isSafeInteger(found.createdHeight) || found.createdHeight < 1
@@ -59,7 +58,10 @@ export function createDelegationService({ chainId, generationId, scopes, issuer,
       refuse('DELEGATION_PROFILE_INVALID', 401);
     }
     const profile = await readProfile(ACCOUNTS, request.id, found.value);
-    if (!profile || profile.pub !== request.pub) refuse('DELEGATION_PROFILE_INVALID', 401);
+    // A wallet profile's key signs only through device certificates; a password profile never has one.
+    if (!profile || profile.pub !== request.pub || (profile.v === 2) !== (request.cert !== undefined)) {
+      refuse('DELEGATION_PROFILE_INVALID', 401);
+    }
     if (!(await checkAuthority(request.scope))) refuse('DELEGATION_ISSUER_INACTIVE', 409);
 
     // Reserve the nonce after the slow checks, with no await between lookup and insertion,
