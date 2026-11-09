@@ -192,8 +192,7 @@ async function claim(c, r) {
   if (land.staminaAt(c0.id, Date.now()) - minePending() < 1) { toast('Out of stamina — it refills every 4 s', 'info'); return; }
   if (Date.now() >= land.end) { toast('This season has ended', 'info'); return; }
   try {
-    const sig = await c0.sign(claimStatement(CONFIG, land.season, land.seed, c, r, c0.id));
-    const value = utf8(JSON.stringify({ v: 1, id: c0.id, pub: c0.pub, sig }));
+    const value = utf8(JSON.stringify({ v: 1, ...(await c0.signed(claimStatement(CONFIG, land.season, land.seed, c, r, c0.id))) }));
     const envelope = putIfAbsentEnvelope(CONFIG.collection, utf8(tileKey(CONFIG, land.season, land.seed, c, r)), value);
     ui.pending.set(key, c0.id);
     const submitted = Date.now();

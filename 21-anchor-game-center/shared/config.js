@@ -120,8 +120,9 @@ export const GAMES = [
     title: 'Neon Rush',
     tagline: 'Night-city bike racing',
     blurb: 'Two laps through neon streets, weaving through traffic and riding slipstreams. The circuit comes from a block, '
-      + 'every browser replays your inputs to time you, and rivals appear on your road live from their signed checkpoint splits.',
-    players: 'time trial · ghosts and live riders · 15-minute seasons',
+      + 'every browser replays your inputs to time you, and rivals appear on your road live from their signed checkpoint splits. '
+      + 'Open a race lobby and start together, at a moment set by the ledger.',
+    players: 'time trial or race lobbies · ghosts and live riders · 15-minute seasons',
     color: '#ff3fd0',
   },
   {

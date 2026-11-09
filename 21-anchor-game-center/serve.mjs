@@ -8,6 +8,10 @@
 //                              topics.json, and the delegation service beside the site
 //   YANO_NODES=http://127.0.0.1:7210,http://127.0.0.1:7211 node serve.mjs
 //                              other members; /topics.json is then whatever this folder holds
+//   node serve.mjs --local --host 0.0.0.0
+//                              also reachable from the local network (default: this machine only).
+//                              Over plain http on a LAN address a browser withholds WebCrypto, so
+//                              visitors can watch but not sign in; see the README.
 //
 // The delegation service holds the issuer key in its own process state, never
 // in a served file; anything under a dot-directory (.yano/) is refused.
@@ -20,11 +24,14 @@ import { existsSync, readFileSync } from 'node:fs';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
+import { networkInterfaces } from 'node:os';
 import { CENTER } from './shared/config.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const PORT = Number(process.env.PORT ?? 8787);
 const LOCAL = process.argv.includes('--local');
+const hostAt = process.argv.indexOf('--host');
+const HOST = (hostAt > 0 ? process.argv[hostAt + 1] : process.env.HOST) || '127.0.0.1';
 const GAMES = join(ROOT, '.yano', 'games');
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -108,8 +115,14 @@ http.createServer(async (req, res) => {
     if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain' });
     res.end(`proxy error: ${error.message}`);
   }
-}).listen(PORT, '127.0.0.1', () => {
+}).listen(PORT, HOST, () => {
   console.log(`Anchor Games on http://localhost:${PORT}/?proxy=1`);
+  if (!['127.0.0.1', 'localhost', '::1'].includes(HOST)) {
+    const lan = Object.values(networkInterfaces()).flat()
+      .filter((a) => a?.family === 'IPv4' && !a.internal && (HOST === '0.0.0.0' || a.address === HOST));
+    for (const a of lan) console.log(`  on the network: http://${a.address}:${PORT}/?proxy=1`);
+    console.log('  (anyone who can reach this machine can use the site and its proxy to the members)');
+  }
   NODES.forEach((n, i) => console.log(`  /proxy/${i} → ${n}`));
   if (DELEGATIONS) console.log(`  /delegations → ${DELEGATIONS}`);
 });

@@ -1,10 +1,10 @@
 // The game center page: sign in once, pick a game. Each game card links to
 // the game's own folder; every game reads the same commander from this
-// origin's localStorage, so the sign-in here carries over.
+// origin's IndexedDB, so the sign-in here carries over.
 
 import { CENTER, GAMES, ACCOUNTS, applyProxy, withQuery } from './shared/config.js';
 import { Ledger } from './shared/ledger.js';
-import { Session } from './shared/auth.js';
+import { Session, keyLabel } from './shared/auth.js';
 import { proveProfile } from './shared/proofs.js';
 import { ProofPanel, esc, reportReachability } from './shared/ui.js';
 import { rocket } from './arcade/js/render.js';
@@ -40,21 +40,25 @@ function renderCommander() {
   if (c) {
     $('avatar').textContent = c.id[0];
     $('me-name').textContent = c.id;
-    $('me-key').textContent = `key ${c.pub.slice(0, 6)}…${c.pub.slice(-4)}`
+    $('me-key').textContent = keyLabel(c)
       + (session.profileHeight ? ` · profile at height ${session.profileHeight}` : '');
   }
 }
 session.onChange(renderCommander);
 $('create').onclick = () => session.open('create');
 $('signin').onclick = () => session.open('signin');
+$('wallet').onclick = () => session.open('wallet');
 $('signout').onclick = () => session.signOut();
+document.querySelectorAll('.clear-data').forEach((b) => session.bindClear(b));
 $('prove-me').onclick = () => {
   const c = session.commander;
   panel.open(`Commander ${c.id}`, `
     <dl class="facts">
       <dt>Call sign</dt><dd><b>${esc(c.id)}</b></dd>
       <dt>Stored at</dt><dd class="mono">${esc(ACCOUNTS.profilesChain)} · ${esc(ACCOUNTS.profilesCollection)}</dd>
-      <dt>Holds</dt><dd>public key, PBKDF2 salt and the password-locked signing key — never the password</dd>
+      <dt>Holds</dt><dd>${c.wallet
+        ? 'the wallet’s public key, its address and the wallet’s signature that let the first browser play: no key that could be unlocked'
+        : 'public key, PBKDF2 salt and the password-locked signing key — never the password'}</dd>
     </dl>
     <div class="proof-out"></div>`);
   panel.run(() => proveProfile(ledger, session.profiles, c.id, { threshold: status?.threshold ?? 1, expectPub: c.pub }),
