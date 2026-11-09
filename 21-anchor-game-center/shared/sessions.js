@@ -18,13 +18,19 @@
 //      for <call sign> in games/<game>/". It travels inside every move, so
 //      every browser can tell who a session key belongs to.
 //
+// A wallet commander signs steps 2 and 3 with this browser's device key and
+// attaches the device certificate its wallet signed (shared/accounts.js), so
+// the service and every browser can check device key → wallet → profile. The
+// wallet itself is asked once per browser, not once per game or per hour.
+//
 // After that every move is signed by the session key alone. The members check
 // the frame (session signature, credential, scope, time window, replay) before
 // it is stored; every browser checks it again here before its rules run.
 
-import { DelegatedSession, decodeWire, hex, nonce, topicRequest, unhex, verifyFrameSignatures,
-  verifySignature } from './topic-client/topics.mjs';
-import { CALLSIGN } from './accounts.js';
+import { DelegatedSession, decodeWire, hex, nonce, topicRequest, unhex, verifyFrameSignatures }
+  from './topic-client/topics.mjs';
+import { CALLSIGN, verifySigned } from './accounts.js';
+import { ACCOUNTS } from './config.js';
 
 export const NAMESPACE = 'games/';
 export const SESSION_MS = 3_600_000;
@@ -50,7 +56,7 @@ const REQUEST_FIELDS = ['v', 'chainId', 'generationId', 'scope', 'id', 'pub', 's
 /** What the commander signs to ask for a credential. Throws on a malformed request. */
 export function requestStatement(r) {
   if (!r || typeof r !== 'object' || Array.isArray(r)
-      || Object.keys(r).some((key) => ![...REQUEST_FIELDS, 'sig'].includes(key))
+      || Object.keys(r).some((key) => ![...REQUEST_FIELDS, 'sig', 'cert'].includes(key))
       || r.v !== 1 || typeof r.chainId !== 'string' || !r.chainId.length || r.chainId.length > 128
       || typeof r.generationId !== 'string' || !HEX64.test(r.generationId) || !isGameScope(r.scope)
       || typeof r.id !== 'string' || !CALLSIGN.test(r.id) || typeof r.pub !== 'string' || !HEX64.test(r.pub)
@@ -130,18 +136,25 @@ export async function openMove(topics, scope, entry, cache = new Map()) {
   }
   const pass = move?.pass;
   if (!pass || typeof pass.id !== 'string' || !CALLSIGN.test(pass.id) || typeof pass.pub !== 'string'
-      || !HEX64.test(pass.pub) || typeof pass.sig !== 'string' || !HEX128.test(pass.sig)) {
+      || !HEX64.test(pass.pub) || typeof pass.sig !== 'string' || !HEX128.test(pass.sig)
+      || Object.keys(pass).some((k) => !['id', 'pub', 'sig', 'cert'].includes(k))) {
     return refuse('the move carries no session pass');
   }
-  const key = `${session}|${pass.id}|${pass.pub}|${pass.sig}`;
+  // A wallet commander's pass is signed by a device key its wallet certified; the certificate
+  // must still be valid when the issuer delegated this session key (the credential's notBefore).
+  const key = `${session}|${pass.id}|${pass.pub}|${pass.sig}|${pass.cert?.cose ?? ''}|${pass.cert?.until ?? ''}`;
   if (!cache.has(key)) {
-    cache.set(key, await verifySignature(unhex(pass.pub), unhex(pass.sig),
-      utf8(passStatement(topics, scope, pass.id, pass.pub, session))));
+    cache.set(key, await verifySigned(ACCOUNTS, pass, passStatement(topics, scope, pass.id, pass.pub, session),
+      Number(delegation[3])));
   }
-  if (!cache.get(key)) return refuse('the session pass is not signed by that commander');
+  if (!cache.get(key)) {
+    return refuse(pass.cert ? 'the session pass is not signed by a device that commander’s wallet certified'
+      : 'the session pass is not signed by that commander');
+  }
   const { pass: _, ...body } = move;
   return { ...entry, session: true, body, refusal: null,
-    author: { id: pass.id, pub: pass.pub, session, issuer, until: Number(delegation[4]) } };
+    author: { id: pass.id, pub: pass.pub, session, issuer, until: Number(delegation[4]),
+      ...(pass.cert ? { device: pass.cert.device, certUntil: pass.cert.until } : {}) } };
 }
 
 // ------------------------------------------------------------------ this browser's sessions
@@ -171,6 +184,12 @@ function idb(mode, action) {
     transaction.oncomplete = () => resolve(request.result);
     transaction.onabort = transaction.onerror = () => reject(new Error('session storage failed'));
   }));
+}
+
+/** Forget every session key this browser holds, for every commander ("Clear browser data"). */
+export async function forgetAllSessions() {
+  if (typeof indexedDB === 'undefined') return;
+  await idb('readwrite', (store) => store.clear()).catch(() => {});
 }
 
 /** Forget every session key this browser holds for a commander (on sign-out). */
@@ -235,6 +254,7 @@ export class Moves {
         const request = { v: 1, chainId, generationId, scope, id: commander.id, pub: commander.pub, session: delegate,
           issuedAt: now, expiresAt: now + REQUEST_MS, nonce: nonce() };
         request.sig = await commander.sign(requestStatement(request));
+        if (commander.cert) request.cert = commander.cert;
         const result = await topicRequest(delegationEndpoint, request);
         return unhex(result.delegationHex);
       },
@@ -267,7 +287,7 @@ export class Moves {
     const { session: key } = await this.prepare(commander);
     if (!this.mine.has(key)) {
       const sig = await commander.sign(passStatement(this.topics, this.cfg.scope, commander.id, commander.pub, key));
-      this.mine.set(key, { id: commander.id, pub: commander.pub, sig });
+      this.mine.set(key, { id: commander.id, pub: commander.pub, sig, ...(commander.cert ? { cert: commander.cert } : {}) });
     }
     const payload = utf8(JSON.stringify({ ...move, pass: this.mine.get(key) }));
     const frame = await this.current.session.frame(topic, payload);

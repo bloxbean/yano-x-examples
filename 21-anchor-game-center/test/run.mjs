@@ -6,8 +6,11 @@
 import { blake2b } from '../shared/blake2b.js';
 import { decodeEntry, putIfAbsentEnvelope } from '../shared/authmap.js';
 import { logicalValueHash } from '../shared/proofs.js';
-import { createCommander, readProfile, unlockCommander } from '../shared/accounts.js';
-import { fromHex, toHex, utf8 } from '../shared/crypto.js';
+import { Commander, createCommander, readProfile, unlockCommander, verifySigned, walletProfileBytes }
+  from '../shared/accounts.js';
+import { ed25519Import, ed25519Sign, fromHex, toHex, utf8 } from '../shared/crypto.js';
+import { DEVICE_MS, certifyDevice } from '../shared/wallet.js';
+import { createMockWallet } from './mock-wallet.js';
 import { ACCOUNTS } from '../shared/config.js';
 import { Galaxy, generateMap, isqrt, moveStatement, roundStart } from '../galaxy/js/galaxy.js';
 import { CONFIG } from '../galaxy/js/config.js';
@@ -27,7 +30,8 @@ import { CONFIG as REEF } from '../reef/js/config.js';
 import { Reef, Timeline, census, seedStatement, shape, soup, stamp, step, worldHash } from '../reef/js/reef.js';
 import { CONFIG as MOTO } from '../moto/js/config.js';
 import { Run as Ride, Track, autopilot as rider, replay as replayRide, THROTTLE as GAS } from '../moto/js/sim.js';
-import { Circuit, circuitSeed, inputsHash as rideHash, runStatement as rideStatement, splitStatement } from '../moto/js/races.js';
+import { robotRide } from '../moto/js/robot.js';
+import { Circuit, RIDE_MS, circuitSeed, inputsHash as rideHash, lobbyPhase, raceStandings, runStatement as rideStatement, splitStatement } from '../moto/js/races.js';
 import { CONFIG as SONAR } from '../sonar/js/config.js';
 import { Moves, openMove, passStatement, requestStatement } from '../shared/sessions.js';
 import * as Topics from '../shared/topic-client/topics.mjs';
@@ -145,6 +149,16 @@ await check('a profile round-trips: create, read back, unlock with the password'
   eq(unlocked.pub, c.pub);
   const sig = await unlocked.sign('hello');
   eq(sig, await c.sign('hello')); // Ed25519 is deterministic: same key, same signature
+});
+await check('the commander key, created or unlocked, signs but cannot be exported', async () => {
+  const { commander: c, profileBytes } = await createCommander(ACCOUNTS, 'lyra', 'correct horse battery', FAST);
+  const unlocked = await unlockCommander(ACCOUNTS, await readProfile(ACCOUNTS, 'lyra', profileBytes), 'correct horse battery');
+  for (const k of [c, unlocked]) {
+    eq(k.privateKey.extractable, false);
+    assert(!('pkcs8' in k), 'a commander must not carry key bytes');
+    await throws(() => crypto.subtle.exportKey('pkcs8', k.privateKey), /extractable|not allowed|InvalidAccess/i);
+  }
+  eq(await unlocked.sign('hello'), await c.sign('hello'));
 });
 await check('the wrong password does not unlock', async () => {
   const { profileBytes } = await createCommander(ACCOUNTS, 'vega', 'correct horse battery', FAST);
@@ -318,6 +332,130 @@ await check('every session game writes under its own registered entry', async ()
     assert(Topics.isNamespace(cfg.scope) && cfg.scope.startsWith('games/'), `${game}: ${cfg.scope}`);
   }
   assert(!PLUGIN_CONFIG.sessions && PLUGIN_CONFIG.movesChain === 'duels-chain', 'the plugin edition stays signed');
+});
+
+console.log('wallet commanders');
+
+/** A wallet commander on one browser: one signData from `mock`, which it returns too. */
+async function walletCommander(id, { mock, now } = {}) {
+  mock ??= await createMockWallet();
+  const address = (await mock.api.getRewardAddresses())[0];
+  const d = await certifyDevice(ACCOUNTS, mock.api, address, id, now);
+  return { mock, address, commander: new Commander(id, d.pub, d.privateKey, { cert: d.cert, address }),
+    profileBytes: walletProfileBytes(ACCOUNTS, id, d.pub, address, d.cert) };
+}
+const swapCert = (signed, cert) => ({ ...signed, cert });
+
+await check('a wallet claims a call sign with one signature; its profile holds no key to unlock', async () => {
+  const { mock, commander: ram, profileBytes: bytes } = await walletCommander('ram');
+  eq(mock.signed.length, 1, 'one wallet popup');
+  assert(mock.signed[0].startsWith('Anchor Games: let this browser play as "ram" until '), mock.signed[0]);
+  assert(mock.signed[0].includes(`device ${ram.cert.device}`), 'the wallet sees which device key it certifies');
+  const profile = await readProfile(ACCOUNTS, 'ram', bytes);
+  assert(profile, 'the wallet profile verifies');
+  eq(profile.v, 2); eq(profile.pub, ram.pub); eq(profile.pub, mock.record.publicKey, 'pub is the wallet’s own key');
+  assert(!('cipher' in profile) && !('kdf' in profile), 'nothing locked, nothing to unlock');
+  eq(ram.privateKey.extractable, false, 'the device key cannot be exported');
+  eq(await readProfile(ACCOUNTS, 'rama', bytes), null, 'not under another call sign');
+  const other = await walletCommander('ram');
+  const p = JSON.parse(new TextDecoder().decode(bytes));
+  eq(await readProfile(ACCOUNTS, 'ram', utf8(JSON.stringify({ ...p, pub: other.commander.pub }))), null, 'not with another wallet’s key');
+  eq(await readProfile(ACCOUNTS, 'ram', utf8(JSON.stringify({ ...p, cert: other.commander.cert }))), null, 'not with another wallet’s certificate');
+  await throws(() => unlockCommander(ACCOUNTS, profile, 'correct horse battery'), /Cardano wallet/);
+});
+await check('a second browser: the same wallet certifies a new device key for the same call sign', async () => {
+  const first = await walletCommander('orion');
+  const second = await walletCommander('orion', { mock: first.mock });
+  eq(second.commander.pub, first.commander.pub, 'the same identity');
+  assert(second.commander.cert.device !== first.commander.cert.device, 'a device key of its own');
+  eq(first.mock.signed.length, 2, 'one popup per browser');
+  const statement = 'anything a commander signs';
+  assert(await verifySigned(ACCOUNTS, await second.commander.signed(statement), statement), 'its signatures count as orion’s');
+});
+await check('a device signature counts only with its wallet’s certificate for that call sign, until it expires', async () => {
+  const { commander: ram } = await walletCommander('ram');
+  const { commander: mallory } = await walletCommander('mallory');
+  const statement = 'ram|go|1';
+  const signed = await ram.signed(statement);
+  assert(await verifySigned(ACCOUNTS, signed, statement), 'valid');
+  assert(await verifySigned(ACCOUNTS, signed, statement, ram.cert.until), 'valid up to the last moment');
+  assert(!(await verifySigned(ACCOUNTS, signed, statement, ram.cert.until + 1)), 'expired');
+  assert(!(await verifySigned(ACCOUNTS, signed, 'ram|go|2')), 'another statement');
+  const { cert: _, ...bare } = signed;
+  assert(!(await verifySigned(ACCOUNTS, bare, statement)), 'a device signature is not the wallet’s');
+  // Mallory's device, ram's certificate: the certificate names another device key.
+  assert(!(await verifySigned(ACCOUNTS, swapCert(await mallory.signed(statement), ram.cert), statement)) , 'borrowed certificate');
+  const asRam = { ...(await mallory.signed(statement)), id: 'ram', pub: ram.pub };
+  assert(!(await verifySigned(ACCOUNTS, asRam, statement)), 'mallory’s certificate for ram’s key');
+  assert(!(await verifySigned(ACCOUNTS, { ...signed, id: 'rama' }, statement)), 'a certificate is for one call sign');
+  assert(!(await verifySigned(ACCOUNTS, swapCert(signed, { ...ram.cert, until: ram.cert.until + DEVICE_MS }), statement)),
+    'a stretched expiry is not what the wallet signed');
+});
+await check('a wallet commander’s session pass opens as that commander; a borrowed or expired certificate does not', async () => {
+  const { commander: ram } = await walletCommander('ram');
+  const key = await Topics.createSessionKey();
+  const pass = await ram.signed(passStatement(TOPICS, 'games/galaxy/', 'ram', ram.pub, key.publicKey));
+  const entry = await framed({ t: 'go', id: 'ram', n: 1, from: 0, to: 9, pct: 50 }, { key, pass });
+  const opened = await open(entry);
+  eq(opened.refusal, null);
+  eq(opened.author.id, 'ram'); eq(opened.author.pub, ram.pub); eq(opened.author.device, ram.cert.device);
+  const size = Topics.decodeWire('frame', Topics.unhex(entry.bodyHex))[1].length;
+  assert(size < 1400, `a galaxy move with a wallet pass is ${size} bytes; the topic allows 2048`);
+  const { commander: mallory } = await walletCommander('mallory');
+  const stolen = swapCert(await mallory.signed(passStatement(TOPICS, 'games/galaxy/', 'ram', ram.pub, key.publicKey)), ram.cert);
+  eq((await open(await framed({ t: 'go', id: 'ram', n: 1 }, { key, pass: { ...stolen, id: 'ram', pub: ram.pub } }))).refusal,
+    'the session pass is not signed by a device that commander’s wallet certified');
+  const { commander: old } = await walletCommander('ram', { now: Date.now() - DEVICE_MS - 60_000 });
+  const late = await old.signed(passStatement(TOPICS, 'games/galaxy/', 'ram', old.pub, key.publicKey));
+  eq((await open(await framed({ t: 'go', id: 'ram', n: 1 }, { key, pass: late }))).refusal,
+    'the session pass is not signed by a device that commander’s wallet certified', 'expired before the credential');
+});
+async function walletLogin(c, { cert = c.cert, issuedAt = Date.now() } = {}) {
+  const request = { v: 1, chainId: TOPICS.chainId, generationId: GEN, scope: 'games/galaxy/', id: c.id, pub: c.pub,
+    session: (await Topics.createSessionKey()).publicKey, issuedAt, expiresAt: issuedAt + 60_000, nonce: Topics.nonce() };
+  request.sig = await c.sign(requestStatement(request));
+  if (cert) request.cert = cert;
+  return request;
+}
+await check('the delegation service issues to a wallet commander’s device, and refuses mixed-up kinds', async () => {
+  const made = await walletCommander('vela');
+  registered.set('vela', { present: true, status: 0, revision: 1, createdHeight: 3, committedHeight: 9, value: made.profileBytes });
+  const vela = made.commander;
+  eq(await refusal(await walletLogin(vela)), 'issued');
+  eq(await refusal(await walletLogin(vela, { cert: null })), 'DELEGATION_AUTHENTICATION_FAILED', 'a device key alone');
+  const expired = await walletCommander('vela', { mock: made.mock, now: Date.now() - DEVICE_MS - 60_000 });
+  eq(await refusal(await walletLogin(expired.commander)), 'DELEGATION_AUTHENTICATION_FAILED', 'an expired certificate');
+  // The wallet key signing a request itself (no certificate) is not how a wallet profile logs in.
+  const walletKey = await ed25519Import(fromHex(made.mock.record.pkcs8));
+  const raw = { id: 'vela', pub: vela.pub, sign: async (t) => toHex(await ed25519Sign(walletKey, utf8(t))) };
+  eq(await refusal(await walletLogin(raw, { cert: null })), 'DELEGATION_PROFILE_INVALID');
+  // A password profile with someone's certificate attached.
+  const pilot = await enlist('pilot2');
+  eq(await refusal({ ...(await login(pilot)), cert: vela.cert }), 'DELEGATION_AUTHENTICATION_FAILED');
+});
+await check('a wallet commander’s page: the wallet signs once; the device key signs the login and the pass', async () => {
+  const made = await walletCommander('lynx');
+  registered.set('lynx', { present: true, status: 0, revision: 1, createdHeight: 3, committedHeight: 9, value: made.profileBytes });
+  const sent = [];
+  const ledger = { submit: async (chain, relay, topic, payload) => { sent.push({ topic, ...payload }); return { messageId: `w${sent.length}` }; } };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => new Response(JSON.stringify(await service(JSON.parse(init.body))), { status: 200 });
+  try {
+    const moves = new Moves(ledger, CONFIG, TOPICS);
+    const topic = `games/galaxy/r${ROUND}`;
+    await moves.submit(made.commander, 0, topic, { t: 'join', id: 'lynx', pub: made.commander.pub, n: 1 });
+    await moves.submit(made.commander, 0, topic, { t: 'go', id: 'lynx', n: 2, from: 0, to: 9, pct: 50 });
+    eq(made.mock.signed.length, 1, 'no wallet popup after the first');
+    const g = new Galaxy(CONFIG, ROUND);
+    for (const [i, m] of sent.entries()) {
+      const e = await openMove(TOPICS, CONFIG.scope, { height: 1, index: i, messageId: `w${i}`, topic: m.topic, timestamp: T0 + 1000, bodyHex: m.bodyHex });
+      eq(e.author?.id, 'lynx'); eq(e.author.pub, made.commander.pub);
+      assert((await g.apply(e, anyone)).accepted, `move ${i} applies`);
+    }
+    await moves.clear();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
 
 console.log('the galaxy');
@@ -586,8 +724,9 @@ async function register(id, timestamp) {
 async function claimEntry(id, c, r, timestamp, { sign = id, seed = LSEED } = {}) {
   const { commander } = await landCommander(id);
   const signer = (await landCommander(sign)).commander;
-  const sig = await signer.sign(claimStatement(LAND, SEASON, seed, c, r, id));
-  const value = utf8(JSON.stringify({ v: 1, id, pub: commander.pub, sig }));
+  const statement = claimStatement(LAND, SEASON, seed, c, r, id);
+  const signed = sign === id ? await commander.signed(statement) : { id, pub: commander.pub, sig: await signer.sign(statement) };
+  const value = utf8(JSON.stringify({ v: 1, ...signed }));
   return authEntry(putIfAbsentEnvelope(ACCOUNTS.profilesCollection, utf8(tileKey(LAND, SEASON, seed, c, r)), value), timestamp);
 }
 const noReceipt = async () => { throw new Error('the fold should not need a receipt here'); };
@@ -682,6 +821,27 @@ await check('two browsers folding the same claims reach the same map and standin
   const view = (l) => JSON.stringify([...l.tiles.entries()].map(([k, t]) => [k, t.owner ?? null, t.reason ?? null]));
   eq(view(one), view(two));
   eq(JSON.stringify(one.standings()), JSON.stringify(two.standings()));
+});
+
+await check('a wallet commander claims land with its device key; a borrowed or expired certificate scorches', async () => {
+  profileBytes.set('tern', await walletCommander('tern', { now: S0 }));
+  profileBytes.set('skua', await walletCommander('skua', { now: S0 }));
+  const land = await landWith('tern', 'skua');
+  const won = await outcome(land, await claimEntry('tern', 6, 6, S0 + 10));
+  eq(won.kind, 'claimed'); eq(won.id, 'tern');
+  const tern = (await landCommander('tern')).commander;
+  const skua = (await landCommander('skua')).commander;
+  const statement = claimStatement(LAND, SEASON, LSEED, 8, 8, 'tern');
+  const borrowed = { v: 1, ...(await skua.signed(statement)), id: 'tern', pub: tern.pub, cert: tern.cert };
+  const body = (v) => putIfAbsentEnvelope(ACCOUNTS.profilesCollection, utf8(tileKey(LAND, SEASON, LSEED, v[0], v[1])), utf8(JSON.stringify(v[2])));
+  eq((await outcome(land, authEntry(body([8, 8, borrowed]), S0 + 20))).reason, 'not signed by a device its wallet certified');
+  // Another browser of tern's whose certificate ran out a moment before its claim landed.
+  const old = (await walletCommander('tern', { mock: profileBytes.get('tern').mock, now: S0 + 30 - DEVICE_MS })).commander;
+  const late = { v: 1, ...(await old.signed(claimStatement(LAND, SEASON, LSEED, 7, 6, 'tern'))) };
+  eq((await outcome(land, authEntry(body([7, 6, late]), S0 + 31))).reason, 'not signed by a device its wallet certified',
+    'claimed after the certificate expired');
+  const ok = { v: 1, ...(await old.signed(claimStatement(LAND, SEASON, LSEED, 6, 7, 'tern'))) };
+  eq((await outcome(land, authEntry(body([6, 7, ok]), S0 + 29))).kind, 'claimed', 'while it was valid');
 });
 
 console.log('sealed duels');
@@ -1166,6 +1326,216 @@ await check('the season: a run counts only if its inputs replay to the claimed t
   eq((await circuit.apply(rooted(entry(honest, MT + 5000), HROOT('h')), anyone)).reason, 'stale nonce (replayed)');
   const elsewhere = await rideRun('satya', circuit, frames, finished, '00'.repeat(16));
   eq((await circuit.apply(rooted(entry(elsewhere, MT + 6000), HROOT('i')), anyone)).reason, 'ridden on another circuit');
+});
+
+console.log('neon rush race lobbies');
+
+// Lobby events are ordinary season moves; a race is named by its lobby message's id.
+const raceMsg = (move, ts) => { height += 1; return sessionEntry(move, { height, index: 0, messageId: height.toString(16).padStart(64, '0'), timestamp: ts }); };
+async function raceMove(t, id, fields) {
+  const c = await commander(id);
+  return signedBy(c, { t, id, pub: c.pub, n: ++rideNonce, ...fields });
+}
+const R = MOTO.race;
+async function season(at = MT + 1000, from = 60_000 + Math.floor(Math.random() * 1e6)) {
+  height = from;
+  const circuit = new Circuit(MOTO, MS);
+  await circuit.apply(rooted(raceMsg({ t: 'open' }, at), HROOT('l')), anyone);
+  return circuit;
+}
+const play = async (circuit, move, ts) => circuit.apply(rooted(raceMsg(move, ts), HROOT('m')), anyone);
+async function openLobby(circuit, host, ts, { wait = 30_000, max = 4, alone = 'wait' } = {}) {
+  const r = await play(circuit, await raceMove('lobby', host, { wait, max, alone }), ts);
+  assert(r.accepted, r.reason);
+  return r.lobby.id;
+}
+const grid = (circuit, race) => circuit.lobbies.get(race).members.map((m) => m.id).join(',');
+
+await check('a lobby: joins finalized before the close take a place in order; at the close or after, and twice, they are refused', async () => {
+  const from = 60_000 + Math.floor(Math.random() * 1e6);
+  const a = await season(MT + 1000, from);
+  const b = await season(MT + 1000, from); // a second browser, folding the same messages from the same height
+  const moves = [];
+  const both = async (move, ts) => { const e = raceMsg(move, ts); const ra = await a.apply(rooted(e, HROOT('m')), anyone); const rb = await b.apply(rooted(e, HROOT('m')), anyone); eq(ra.accepted, rb.accepted); eq(ra.reason, rb.reason); moves.push(ra); return ra; };
+  const created = await both(await raceMove('lobby', 'nova', { wait: 30_000, max: 4, alone: 'wait' }), MT + 10_000);
+  const race = created.lobby.id;
+  assert(/^[0-9a-f]{64}$/.test(race), 'the race is named by the lobby message id');
+  assert((await both(await raceMove('join', 'satya', { race }), MT + 20_000)).accepted);
+  eq((await both(await raceMove('join', 'satya', { race }), MT + 21_000)).reason, 'already on this grid');
+  assert((await both(await raceMove('join', 'kai', { race }), MT + 39_999)).accepted, 'one millisecond before the close');
+  eq((await both(await raceMove('join', 'lee', { race }), MT + 40_000)).reason, 'the lobby has closed');
+  eq(grid(a, race), 'nova,satya,kai');
+  eq(grid(b, race), grid(a, race), 'every browser has the same grid');
+  const pa = lobbyPhase(MOTO, a.lobbies.get(race), MT + 40_000);
+  const pb = lobbyPhase(MOTO, b.lobbies.get(race), MT + 40_000);
+  eq(pa.state, 'countdown');
+  eq(pa.closesAt, MT + 40_000);
+  eq(pa.startAt, MT + 40_000 + R.leadMs, 'the start is the close plus the lead, in ledger time');
+  eq(pb.startAt, pa.startAt, 'and the same for everyone');
+  eq(lobbyPhase(MOTO, a.lobbies.get(race), pa.startAt).state, 'racing');
+  eq(lobbyPhase(MOTO, a.lobbies.get(race), pa.startAt + RIDE_MS + R.graceMs).state, 'finished');
+});
+
+await check('a lobby: a full grid, one race at a time, a stale nonce, and only the host starts it early', async () => {
+  const c = await season();
+  const race = await openLobby(c, 'nova', MT + 10_000, { max: 2 });
+  assert((await play(c, await raceMove('join', 'satya', { race }), MT + 11_000)).accepted);
+  eq((await play(c, await raceMove('join', 'kai', { race }), MT + 12_000)).reason, 'the grid is full');
+  const other = await play(c, await raceMove('lobby', 'satya', { wait: 15_000, max: 4, alone: 'ride' }), MT + 13_000);
+  assert(/^already on the grid of race/.test(other.reason), other.reason);
+  const stale = await raceMove('leave', 'satya', { race });
+  stale.n = 1; // satya's join used a later nonce
+  eq((await play(c, stale, MT + 13_500)).reason, 'stale nonce (replayed)');
+  eq((await play(c, await raceMove('start', 'satya', { race }), MT + 14_000)).reason, 'only the host can start the race');
+  assert((await play(c, await raceMove('start', 'nova', { race }), MT + 15_000)).accepted);
+  const p = lobbyPhase(MOTO, c.lobbies.get(race), MT + 15_000);
+  eq(p.state, 'countdown');
+  eq(p.startAt, MT + 15_000 + R.leadMs);
+  eq((await play(c, await raceMove('join', 'kai', { race }), MT + 15_500)).reason, 'the lobby has closed');
+  eq((await play(c, await raceMove('join', 'kai', { race: 'ab'.repeat(32) }), MT + 16_000)).reason, 'no such race this season');
+  eq((await play(c, await raceMove('lobby', 'kai', { wait: 45_000, max: 4, alone: 'ride' }), MT + 16_500)).reason, 'malformed lobby');
+});
+
+await check('a solo lobby: the host chooses to wait once more, ride alone, or cancel', async () => {
+  const c = await season();
+  const cancel = await openLobby(c, 'nova', MT + 10_000, { wait: 15_000, alone: 'cancel' });
+  const p = lobbyPhase(MOTO, c.lobbies.get(cancel), MT + 25_000);
+  eq(p.state, 'cancelled');
+  eq(p.reason, 'nobody joined');
+  eq((await play(c, await raceMove('join', 'satya', { race: cancel }), MT + 25_000)).reason, 'the race was cancelled');
+  const solo = await openLobby(c, 'nova', MT + 30_000, { wait: 15_000, alone: 'ride' });
+  eq(lobbyPhase(MOTO, c.lobbies.get(solo), MT + 45_000).state, 'countdown', 'a solo race goes ahead');
+  const d = await season();
+  const waits = await openLobby(d, 'kai', MT + 10_000, { wait: 15_000, alone: 'wait' });
+  const e = lobbyPhase(MOTO, d.lobbies.get(waits), MT + 25_000);
+  eq(e.state, 'open');
+  eq(e.extended, true, 'alone at the close: open once more');
+  eq(e.closesAt, MT + 40_000);
+  assert((await play(d, await raceMove('join', 'lee', { race: waits }), MT + 30_000)).accepted, 'a join during the second wait');
+  const f = lobbyPhase(MOTO, d.lobbies.get(waits), MT + 40_000);
+  eq(f.state, 'countdown');
+  eq(f.startAt, MT + 40_000 + R.leadMs);
+  const alone = await openLobby(d, 'zed', MT + 50_000, { wait: 15_000, alone: 'wait' });
+  eq(lobbyPhase(MOTO, d.lobbies.get(alone), MT + 79_999).state, 'open');
+  eq(lobbyPhase(MOTO, d.lobbies.get(alone), MT + 80_000).state, 'cancelled', 'still alone after the second wait');
+});
+
+await check('leaving: before the close it frees the place, the host leaving cancels the race, after the close it is refused', async () => {
+  const c = await season();
+  const race = await openLobby(c, 'nova', MT + 10_000, { max: 2 });
+  assert((await play(c, await raceMove('join', 'satya', { race }), MT + 11_000)).accepted);
+  assert((await play(c, await raceMove('leave', 'satya', { race }), MT + 12_000)).accepted);
+  assert((await play(c, await raceMove('join', 'kai', { race }), MT + 13_000)).accepted, 'the freed place');
+  eq((await play(c, await raceMove('leave', 'satya', { race }), MT + 14_000)).reason, 'not on this race’s grid');
+  eq((await play(c, await raceMove('leave', 'kai', { race }), MT + 40_000)).reason, 'the lobby has closed', 'once closed, not finishing is a DNF');
+  const other = await openLobby(c, 'satya', MT + 41_000);
+  assert((await play(c, await raceMove('leave', 'satya', { race: other }), MT + 42_000)).accepted);
+  const p = lobbyPhase(MOTO, c.lobbies.get(other), MT + 42_000);
+  eq(p.state, 'cancelled');
+  eq(p.reason, 'its host left');
+});
+
+await check('race rides: placed by ridden time; a jump start, a missed start or a rider off the grid counts for the season only; no ride is a DNF', async () => {
+  const c = await season();
+  const race = await openLobby(c, 'nova', MT + 10_000);
+  for (const [id, at] of [['satya', 11_000], ['kai', 12_000], ['zed', 13_000]]) {
+    assert((await play(c, await raceMove('join', id, { race }), MT + at)).accepted);
+  }
+  const { startAt, endsAt } = lobbyPhase(MOTO, c.lobbies.get(race), MT + 40_000);
+  const fast = ride(c.track);
+  const slow = ride(c.track, (r) => (r.frame < 40 ? 0 : rider(r)));
+  assert(slow.finished > fast.finished, 'a slow start finishes later');
+  const crossed = (frames) => startAt + (frames * 1000) / 60;
+  const raceRun = async (id, r, ts) => play(c, { ...(await rideRun(id, c, r.frames, r.finished)), race }, ts);
+  const nova = await raceRun('nova', slow, crossed(slow.finished) + 800);
+  assert(nova.accepted && nova.race.counted, nova.race?.reason);
+  const satya = await raceRun('satya', fast, crossed(fast.finished) + 1200);
+  assert(satya.race.counted, satya.race.reason);
+  const kai = await raceRun('kai', fast, crossed(fast.finished) - R.earlyMs - 1);
+  assert(kai.accepted, 'a jump start still counts for the season');
+  assert(!kai.race.counted && /jump start/.test(kai.race.reason), kai.race.reason);
+  const late = await raceRun('zed', fast, crossed(fast.finished) + R.graceMs + 1);
+  assert(!late.race.counted && /missed/.test(late.race.reason), late.race.reason);
+  const stranger = await raceRun('lee', fast, crossed(fast.finished) + 1000);
+  eq(stranger.race.reason, 'not on this race’s grid');
+  eq((await raceRun('nova', fast, crossed(fast.finished) + 2000)).race.reason, 'already raced');
+  const during = raceStandings(MOTO, c.lobbies.get(race), endsAt - 1);
+  eq(during.map((r) => `${r.id}:${r.status}`).join(' '), 'satya:finished nova:finished kai:racing zed:racing');
+  const after = raceStandings(MOTO, c.lobbies.get(race), endsAt);
+  eq(after.map((r) => `${r.place ?? '-'}${r.id}:${r.status}`).join(' '), '1satya:finished 2nova:finished -kai:dnf -zed:dnf');
+  eq(c.leaderboard().length, 5, 'every verified ride is on the season board, raced or not');
+});
+
+await check('a race must start before the circuit changes and may finish in overtime; a race ride on another circuit is not a ride at all', async () => {
+  const c = await season();
+  const E = MT + MOTO.seasonMs;
+  const tooLate = E - (15_000 + R.leadMs) + 1;
+  eq((await play(c, await raceMove('lobby', 'nova', { wait: 15_000, max: 4, alone: 'ride' }), tooLate)).reason,
+    'too close to the circuit change: the race would not start before it');
+  const last = await play(c, await raceMove('lobby', 'nova', { wait: 15_000, max: 4, alone: 'ride' }), tooLate - 1);
+  assert(last.accepted, 'the last moment that starts in time');
+  eq(lobbyPhase(MOTO, last.lobby, E).startAt, E, 'it starts as the circuit changes');
+  const { frames, finished } = ride(c.track);
+  const run = { ...(await rideRun('nova', c, frames, finished)), race: last.lobby.id };
+  const r = await play(c, run, E + Math.round((finished * 1000) / 60) + 1500);
+  assert(r.accepted, r.reason);
+  assert(r.race.counted, r.race.reason);
+  eq(raceStandings(MOTO, last.lobby, c.closes - 1)[0].id, 'nova', 'finished in overtime');
+  const elsewhere = { ...(await rideRun('nova', c, ride(c.track).frames, 100, '00'.repeat(16))), race: 'ab'.repeat(32) };
+  eq((await play(c, elsewhere, tooLate + 1000)).reason, 'ridden on another circuit');
+});
+await check('overtime: a ride begun before the circuit changed still counts after it; nothing else does', async () => {
+  const c = await season();
+  const E = MT + MOTO.seasonMs;
+  const { frames, finished } = ride(c.track);
+  const rideMs = Math.round((finished * 1000) / 60);
+  const begunBefore = await play(c, await rideRun('nova', c, frames, finished), E - 4000 + rideMs + 1000);
+  assert(begunBefore.accepted && begunBefore.run.timestamp > E, begunBefore.reason ?? 'landed in overtime');
+  eq(c.leaderboard()[0].id, 'nova', 'and it is on the circuit’s board');
+  eq((await play(c, await rideRun('vega', c, frames, finished), E + 30_000 + rideMs)).reason,
+    'a ride begun after the circuit changed');
+  const split = async (id, frame, ts) => {
+    const k = await commander(id);
+    return play(c, signedBy(k, { t: 'split', id, pub: k.pub, n: ++rideNonce, run: 9, cp: 2, frame }), ts);
+  };
+  assert((await split('orion', 900, E + 10_000)).accepted, 'a split 15 s into a ride begun 5 s before the change');
+  eq((await split('orion', 60, E + 60_000)).reason, 'a ride begun after the circuit changed');
+  eq((await play(c, await raceMove('lobby', 'orion', { wait: 15_000, max: 4, alone: 'ride' }), E + 1)).reason,
+    'after the circuit changed: only rides begun on it may still finish');
+  eq(c.closes - E, RIDE_MS + R.graceMs, 'overtime is a whole ride plus the grace');
+  eq((await play(c, await rideRun('lyra', c, frames, finished), c.closes)).reason, 'outside this season');
+  // A circuit nobody opened in time is not opened in overtime.
+  const quiet = new Circuit(MOTO, MS);
+  eq((await quiet.apply(rooted(raceMsg({ t: 'open' }, E + 1), HROOT('q')), anyone)).reason,
+    'after the circuit changed: only rides begun on it may still finish');
+  eq(quiet.seed, null);
+});
+
+await check('a robot rider: its ride is decided up front, is slower when easier, and replays to exactly its time', async () => {
+  const c = await season();
+  const times = {};
+  for (const skill of ['easy', 'fair', 'fast']) {
+    const a = robotRide(c.track, skill, 1234);
+    const b = robotRide(c.track, skill, 1234);
+    eq(Buffer.from(a.frames).toString('hex'), Buffer.from(b.frames).toString('hex'), 'the same salt rides the same');
+    assert(a.finished !== null, `${skill} finishes`);
+    const again = replayRide(c.track, a.frames);
+    eq(again.finished, a.finished, 'its inputs replay to the claimed time');
+    eq(again.splits.join(), a.splits.join(), 'and the same splits');
+    times[skill] = a.finished;
+  }
+  assert(times.easy > times.fair && times.fair > times.fast, JSON.stringify(times));
+  assert(robotRide(c.track, 'fair', 1).frames.length !== robotRide(c.track, 'fair', 2).frames.length
+    || robotRide(c.track, 'fair', 1).finished !== robotRide(c.track, 'fair', 99).finished, 'another salt, another ride');
+  // As a race ride it is an ordinary run, verified like a person's.
+  const race = await openLobby(c, 'nova', MT + 10_000, { wait: 15_000, alone: 'ride' });
+  assert((await play(c, await raceMove('join', 'bot-nova', { race }), MT + 11_000)).accepted);
+  const start = MT + 10_000 + 15_000 + R.leadMs;
+  const r = robotRide(c.track, 'fair', 7);
+  const run = { ...(await rideRun('bot-nova', c, r.frames, r.finished)), race };
+  const result = await play(c, run, start + Math.round(r.finished * 1000 / 60) + 800);
+  assert(result.accepted, result.reason);
+  assert(result.race?.counted, result.race?.reason);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

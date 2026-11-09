@@ -9,7 +9,7 @@ import { Renderer, playerColor } from './render.js';
 import { proveMove } from './proofs.js';
 import { ACCOUNTS, applyProxy, withQuery } from '../../shared/config.js';
 import { Ledger } from '../../shared/ledger.js';
-import { Session } from '../../shared/auth.js';
+import { Session, keyLabel } from '../../shared/auth.js';
 import { proveProfile } from '../../shared/proofs.js';
 import { ProofPanel, esc, reportReachability as showUnreachable, toast, txLink } from '../../shared/ui.js';
 import { ed25519Supported } from '../../shared/crypto.js';
@@ -298,7 +298,7 @@ function renderSide() {
   if (c) {
     $('avatar').textContent = c.id[0];
     $('me-name').textContent = c.id;
-    $('me-key').textContent = `key ${c.pub.slice(0, 6)}…${c.pub.slice(-4)}`
+    $('me-key').textContent = keyLabel(c)
       + (ui.profileHeight ? ` · profile at height ${ui.profileHeight}` : '');
     showSession($('me-key'), moves);
   }

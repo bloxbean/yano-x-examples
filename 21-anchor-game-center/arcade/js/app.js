@@ -10,7 +10,7 @@ import { GHOST_COLORS, Renderer } from './render.js';
 import { proveRun } from './proofs.js';
 import { ACCOUNTS, applyProxy, withQuery } from '../../shared/config.js';
 import { Ledger } from '../../shared/ledger.js';
-import { Session } from '../../shared/auth.js';
+import { Session, keyLabel } from '../../shared/auth.js';
 import { proveProfile } from '../../shared/proofs.js';
 import { ProofPanel, esc, reportReachability, toast, txLink } from '../../shared/ui.js';
 import { blake2b } from '../../shared/blake2b.js';
@@ -411,7 +411,7 @@ function renderSide() {
   if (c) {
     $('avatar').textContent = c.id[0];
     $('me-name').textContent = c.id;
-    $('me-key').textContent = `key ${c.pub.slice(0, 6)}…${c.pub.slice(-4)}`
+    $('me-key').textContent = keyLabel(c)
       + (session.profileHeight ? ` · profile at height ${session.profileHeight}` : '');
     showSession($('me-key'), moves);
   }

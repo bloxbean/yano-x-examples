@@ -13,6 +13,24 @@ const CURVE_SCALE = 0.7;
 const HILL_SCALE = 2;
 const CAR_COLORS = ['#e94d6a', '#3ea7ff', '#f0f0f0', '#ffcc33', '#7dff6a', '#b07cff'];
 const NEON = ['#ff3fd0', '#3ee6ff', '#ffb020', '#7dff6a', '#a78bff', '#ff5a5a'];
+// Bike and helmet colors: [body edge, body light, body shade, helmet, helmet shade].
+const PALETTES = {
+  you: ['#13b8d8', '#7ff4ff', '#0b7f9a', '#ff4fd8', '#5a0f50'],
+  robot: ['#d8780f', '#ffc46b', '#8a4a08', '#9dff5a', '#2a5a10'], // bot-… riders
+  rivals: [
+    ['#7a3fd8', '#c9a6ff', '#45208a', '#ffd23f', '#6a4a08'],
+    ['#2fae4f', '#9dffb0', '#16682a', '#ff6a3f', '#6a1f08'],
+    ['#c8233f', '#ff8fa6', '#7a1022', '#3fe0ff', '#0b5a6a'],
+    ['#c9b21a', '#fff38a', '#7a6a08', '#b07cff', '#3a1f6a'],
+  ],
+};
+/** A rider's colors: amber for robots, otherwise one of the rivals' by a hash of the call sign. */
+function paletteOf(name) {
+  if (name.startsWith('bot-')) return PALETTES.robot;
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return PALETTES.rivals[h % PALETTES.rivals.length];
+}
 
 function mulberry(seed) { // decoration-only randomness for the pre-drawn buildings
   let a = seed >>> 0;
@@ -112,7 +130,8 @@ export class Renderer {
   }
 
   /**
-   * view: { run, ghosts: [{ name, color, run }], live: [{ name, z, x }], now, label }
+   * view: { run, ghosts: [{ name, color, run }], live: [{ name, z, x }], now, label, rider }
+   * (rider: whose bike the camera follows, when it is not yours: a robot's colors)
    */
   frame(view) {
     const { ctx } = this;
@@ -186,7 +205,7 @@ export class Renderer {
     }
     const riders = [];
     for (const g of view.ghosts ?? []) riders.push({ name: g.name, color: g.color, z: g.run.z, x: g.run.x, ghost: true });
-    for (const l of view.live ?? []) riders.push({ name: l.name, color: '#ffffff', z: l.z, x: l.x, live: true });
+    for (const l of view.live ?? []) riders.push({ name: l.name, z: l.z, x: l.x, live: true, palette: paletteOf(l.name) });
     const ridersBySeg = new Map();
     for (const r of riders) {
       const rel = r.z - camZ;
@@ -232,7 +251,7 @@ export class Renderer {
     ctx.fillStyle = haze;
     ctx.fillRect(0, horizon - 40, w, 100);
 
-    this.#bike(run, now(view), speed);
+    this.#bike(run, now(view), speed, view.rider ? paletteOf(view.rider) : PALETTES.you);
     this.#speedLines(speed, now(view));
   }
 
@@ -344,7 +363,8 @@ export class Renderer {
     const { ctx } = this;
     const s = 520 * unit;
     if (y - s * 2 >= clip || s < 2) return;
-    const color = r.live ? '#ffffff' : r.color;
+    if (r.live) { this.#liveRider(x, y, s, r); return; }
+    const color = r.color;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     const halo = ctx.createRadialGradient(x, y - s * 0.7, 0, x, y - s * 0.7, s * 1.3);
@@ -375,7 +395,30 @@ export class Renderer {
     ctx.fillText(label, x, ly);
   }
 
-  #bike(run, t, speed) {
+  /** Another rider on the road, solid and in their own colors (ghosts stay translucent). */
+  #liveRider(x, y, s, r) {
+    const { ctx } = this;
+    const [w, h] = this.size;
+    // The same size as your own bike at the same distance: yours is drawn at the bike's
+    // depth (PLAYER_Z), where s = 520 · CAM_DEPTH / PLAYER_Z · w/2 = 0.26 w.
+    const k = (s / (0.26 * w)) * Math.min(w, h) * 0.00085;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(k, k);
+    this.#bikeBody(1, r.palette, 110, false);
+    ctx.restore();
+    const label = `● ${r.name}`;
+    ctx.font = '600 11px system-ui';
+    const tw = ctx.measureText(label).width + 12;
+    const ly = y - 290 * k - 10;
+    ctx.fillStyle = 'rgba(8,6,20,0.75)';
+    ctx.beginPath(); ctx.roundRect(x - tw / 2, ly - 12, tw, 17, 8); ctx.fill();
+    ctx.fillStyle = r.palette[1];
+    ctx.textAlign = 'center';
+    ctx.fillText(label, x, ly);
+  }
+
+  #bike(run, t, speed, palette) {
     const { ctx } = this;
     const [w, h] = this.size;
     const seg = run.track.segment(run.z);
@@ -387,11 +430,23 @@ export class Renderer {
     ctx.save();
     ctx.translate(bx, by + bounce);
     ctx.rotate(lean);
-    // headlight cone ahead
-    ctx.globalCompositeOperation = 'lighter';
-    const cone = ctx.createRadialGradient(0, -60 * s, 10, 0, -260 * s, 260 * s);
-    cone.addColorStop(0, 'rgba(255,250,220,0.12)'); cone.addColorStop(1, 'rgba(255,250,220,0)');
-    ctx.fillStyle = cone; ctx.beginPath(); ctx.moveTo(-30 * s, -60 * s); ctx.lineTo(-220 * s, -380 * s); ctx.lineTo(220 * s, -380 * s); ctx.lineTo(30 * s, -60 * s); ctx.fill();
+    this.#bikeBody(s, palette, speed, true);
+    ctx.restore();
+    if (run.bump > 20) { // a crash flash
+      ctx.fillStyle = `rgba(255,80,80,${(run.bump - 20) / 60})`;
+      ctx.fillRect(0, 0, w, h);
+    }
+  }
+
+  /** A bike and its rider at the origin, s units per pixel, in `palette`'s colors. */
+  #bikeBody(s, palette, speed, cone) {
+    const { ctx } = this;
+    if (cone) { // headlight cone ahead
+      ctx.globalCompositeOperation = 'lighter';
+      const beam = ctx.createRadialGradient(0, -60 * s, 10, 0, -260 * s, 260 * s);
+      beam.addColorStop(0, 'rgba(255,250,220,0.12)'); beam.addColorStop(1, 'rgba(255,250,220,0)');
+      ctx.fillStyle = beam; ctx.beginPath(); ctx.moveTo(-30 * s, -60 * s); ctx.lineTo(-220 * s, -380 * s); ctx.lineTo(220 * s, -380 * s); ctx.lineTo(30 * s, -60 * s); ctx.fill();
+    }
     ctx.globalCompositeOperation = 'source-over';
     // shadow, tyre, body
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
@@ -399,7 +454,7 @@ export class Renderer {
     ctx.fillStyle = '#0c0c12';
     ctx.beginPath(); ctx.roundRect(-20 * s, -70 * s, 40 * s, 76 * s, 14 * s); ctx.fill();
     const body = ctx.createLinearGradient(-60 * s, 0, 60 * s, 0);
-    body.addColorStop(0, '#13b8d8'); body.addColorStop(0.5, '#7ff4ff'); body.addColorStop(1, '#0b7f9a');
+    body.addColorStop(0, palette[0]); body.addColorStop(0.5, palette[1]); body.addColorStop(1, palette[2]);
     ctx.fillStyle = body;
     ctx.beginPath(); ctx.roundRect(-58 * s, -118 * s, 116 * s, 60 * s, 18 * s); ctx.fill();
     ctx.fillStyle = '#1b1b2a';
@@ -408,7 +463,7 @@ export class Renderer {
     ctx.fillStyle = '#20202e';
     ctx.beginPath(); ctx.roundRect(-38 * s, -210 * s, 76 * s, 80 * s, 26 * s); ctx.fill();
     const helmet = ctx.createRadialGradient(-10 * s, -250 * s, 4, 0, -240 * s, 36 * s);
-    helmet.addColorStop(0, '#ffffff'); helmet.addColorStop(0.4, '#ff4fd8'); helmet.addColorStop(1, '#5a0f50');
+    helmet.addColorStop(0, '#ffffff'); helmet.addColorStop(0.4, palette[3]); helmet.addColorStop(1, palette[4]);
     ctx.fillStyle = helmet; ctx.beginPath(); ctx.arc(0, -240 * s, 34 * s, 0, 7); ctx.fill();
     // tail light and exhaust
     ctx.globalCompositeOperation = 'lighter';
@@ -423,11 +478,6 @@ export class Renderer {
         g.addColorStop(0, 'rgba(120,200,255,0.8)'); g.addColorStop(1, 'rgba(60,120,255,0)');
         ctx.fillStyle = g; ctx.beginPath(); ctx.arc(fx, -52 * s + len / 2, len, 0, 7); ctx.fill();
       }
-    }
-    ctx.restore();
-    if (run.bump > 20) { // a crash flash
-      ctx.fillStyle = `rgba(255,80,80,${(run.bump - 20) / 60})`;
-      ctx.fillRect(0, 0, w, h);
     }
   }
 

@@ -23,7 +23,11 @@ The page sends JSON signed by the commander key:
 ```
 
 The commander signs `anchor-games/delegation-request/v1|chainId|generationId|scope|id|pub|session|issuedAt|expiresAt|nonce`
-([`shared/sessions.js`](../shared/sessions.js), `requestStatement`). The
+([`shared/sessions.js`](../shared/sessions.js), `requestStatement`). A wallet
+commander's request has `pub` set to its wallet's key, is signed by its
+browser's device key, and adds `"cert": { "device", "until", "cose", "key" }`,
+the device certificate its wallet signed (CIP-8). The service checks that
+certificate against the profile's wallet and that it has not expired. The
 service answers `{ "delegationHex" }`, the issuer's credential for that session
 key, scope and one hour, or HTTP 4xx with a code:
 
@@ -33,8 +37,8 @@ key, scope and one hour, or HTTP 4xx with a code:
 | `DELEGATION_CHAIN_MISMATCH` | another chain or generation |
 | `DELEGATION_SCOPE_UNKNOWN` | not one of this deployment's games |
 | `DELEGATION_REQUEST_EXPIRED` | outside its 60-second window |
-| `DELEGATION_AUTHENTICATION_FAILED` | the commander key did not sign it |
-| `DELEGATION_PROFILE_INVALID` | no profile for that call sign, or not revision 1, not self-signed, or another key |
+| `DELEGATION_AUTHENTICATION_FAILED` | the commander key did not sign it, or the device certificate is not that wallet's, or has expired |
+| `DELEGATION_PROFILE_INVALID` | no profile for that call sign, or not revision 1, not self-signed, another key, or a certificate where the profile has none (or none where a wallet profile needs one) |
 | `DELEGATION_ISSUER_INACTIVE` | the committed registry no longer lets this issuer delegate the scope |
 | `DELEGATION_REQUEST_REPLAYED` | that nonce was already used |
 
